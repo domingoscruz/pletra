@@ -24,6 +24,9 @@ function getTraktUrl(pathname: string): string | null {
 	const personMatch = pathname.match(/^\/people\/([^/]+)/);
 	if (personMatch) return `https://trakt.tv/people/${personMatch[1]}`;
 
+	const userMatch = pathname.match(/^\/users\/([^/]+)/);
+	if (userMatch) return `https://trakt.tv/users/${userMatch[1]}`;
+
 	return null;
 }
 
@@ -132,6 +135,8 @@ export function FloatingNav() {
 	const { data: session } = authClient.useSession();
 	const isHome = pathname === "/";
 	const traktUrl = getTraktUrl(pathname);
+	const userSlug = session?.user?.email?.replace(/@trakt\.tv$/, "") || null;
+	const isProfile = userSlug && pathname === `/users/${userSlug}`;
 
 	return (
 		<div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
@@ -158,6 +163,31 @@ export function FloatingNav() {
 						/>
 					</svg>
 				</Link>
+
+				{/* Profile */}
+				{userSlug && (
+					<Link
+						href={`/users/${userSlug}`}
+						className={`flex h-9 items-center rounded-full px-3 text-sm transition-colors ${
+							isProfile ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+						}`}
+						title="Profile"
+					>
+						<svg
+							className="h-4 w-4"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={1.5}
+							viewBox="0 0 24 24"
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+							/>
+						</svg>
+					</Link>
+				)}
 
 				{/* Search trigger */}
 				<button

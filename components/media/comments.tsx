@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
+import Link from "@/components/ui/link";
 
 interface CommentUser {
 	username?: string;
@@ -325,24 +326,50 @@ function CommentCard({
 	const displayName = comment.user?.name || comment.user?.username || "Anonymous";
 	const avatarUrl = comment.user?.images?.avatar?.full;
 	const initial = displayName[0].toUpperCase();
+	const userSlug = comment.user?.ids?.slug ?? comment.user?.username;
+	const profileHref = userSlug ? `/users/${userSlug}` : undefined;
 
 	return (
 		<div className="flex items-start gap-3">
 			{/* Avatar */}
-			<div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-full bg-zinc-800">
-				{avatarUrl ? (
-					<Image src={avatarUrl} alt={displayName} fill className="object-cover" sizes="32px" />
-				) : (
-					<div className="flex h-full w-full items-center justify-center text-xs font-medium text-zinc-400">
-						{initial}
-					</div>
-				)}
-			</div>
+			{profileHref ? (
+				<Link
+					href={profileHref}
+					className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-full bg-zinc-800 transition-opacity hover:opacity-80"
+				>
+					{avatarUrl ? (
+						<Image src={avatarUrl} alt={displayName} fill className="object-cover" sizes="32px" />
+					) : (
+						<div className="flex h-full w-full items-center justify-center text-xs font-medium text-zinc-400">
+							{initial}
+						</div>
+					)}
+				</Link>
+			) : (
+				<div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-full bg-zinc-800">
+					{avatarUrl ? (
+						<Image src={avatarUrl} alt={displayName} fill className="object-cover" sizes="32px" />
+					) : (
+						<div className="flex h-full w-full items-center justify-center text-xs font-medium text-zinc-400">
+							{initial}
+						</div>
+					)}
+				</div>
+			)}
 
 			<div className="min-w-0 flex-1">
 				{/* Header */}
 				<div className="flex items-center gap-2">
-					<span className="text-sm font-medium text-zinc-200">{displayName}</span>
+					{profileHref ? (
+						<Link
+							href={profileHref}
+							className="text-sm font-medium text-zinc-200 transition-colors hover:text-white"
+						>
+							{displayName}
+						</Link>
+					) : (
+						<span className="text-sm font-medium text-zinc-200">{displayName}</span>
+					)}
 					{comment.user?.username && comment.user.name && (
 						<span className="text-[11px] text-zinc-600">@{comment.user.username}</span>
 					)}
