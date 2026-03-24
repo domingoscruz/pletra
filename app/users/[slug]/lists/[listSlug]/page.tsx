@@ -6,7 +6,13 @@ import { ListDetailClient } from "./list-detail-client";
 
 interface Props {
 	params: Promise<{ slug: string; listSlug: string }>;
-	searchParams: Promise<{ sort?: string; order?: string; page?: string; genres?: string; runtimes?: string }>;
+	searchParams: Promise<{
+		sort?: string;
+		order?: string;
+		page?: string;
+		genres?: string;
+		runtimes?: string;
+	}>;
 }
 
 type ListSummary = {
@@ -68,8 +74,7 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 		params: { id: slug, list_id: listSlug },
 	});
 
-	const listInfo =
-		summaryRes.status === 200 ? (summaryRes.body as unknown as ListSummary) : null;
+	const listInfo = summaryRes.status === 200 ? (summaryRes.body as unknown as ListSummary) : null;
 
 	if (!listInfo) {
 		return (
@@ -105,10 +110,7 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 	);
 
 	const items: ListedItem[] = itemsRes.ok ? await itemsRes.json() : [];
-	const totalPages = parseInt(
-		itemsRes.headers.get("x-pagination-page-count") ?? "1",
-		10,
-	);
+	const totalPages = parseInt(itemsRes.headers.get("x-pagination-page-count") ?? "1", 10);
 
 	// Check if this is the current user's list
 	let isOwner = false;
@@ -183,7 +185,11 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 					: `/shows/${item.show?.ids?.slug}`,
 		posterUrl: images[i]?.poster ?? null,
 		backdropUrl: images[i]?.backdrop ?? null,
-		mediaType: item.movie ? ("movies" as const) : item.show ? ("shows" as const) : ("movies" as const),
+		mediaType: item.movie
+			? ("movies" as const)
+			: item.show
+				? ("shows" as const)
+				: ("movies" as const),
 		ids: item.movie?.ids ?? item.show?.ids ?? item.person?.ids ?? {},
 		genres: item.movie?.genres ?? item.show?.genres ?? [],
 	}));
@@ -196,7 +202,13 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 					href={`/users/${slug}/lists`}
 					className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
 				>
-					<svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+					<svg
+						className="h-3.5 w-3.5"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.5}
+						viewBox="0 0 24 24"
+					>
 						<path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
 					</svg>
 					All Lists

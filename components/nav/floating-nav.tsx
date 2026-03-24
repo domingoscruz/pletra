@@ -243,27 +243,26 @@ export function FloatingNav() {
 					<div className="h-5 w-px bg-zinc-700" />
 					<a
 						href={traktUrl ?? "https://trakt.tv"}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-[#ed1c24]"
-							title="View on Trakt"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-[#ed1c24]"
+						title="View on Trakt"
+					>
+						<svg
+							className="h-4 w-4"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={1.5}
+							viewBox="0 0 24 24"
 						>
-							<svg
-								className="h-4 w-4"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth={1.5}
-								viewBox="0 0 24 24"
-							>
-								<path
-									strokeLinecap="round"
-									strokeLinejoin="round"
-									d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-								/>
-							</svg>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+							/>
+						</svg>
 					</a>
 				</>
-
 
 				<div className="h-5 w-px bg-zinc-700" />
 

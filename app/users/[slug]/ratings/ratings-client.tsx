@@ -199,7 +199,11 @@ export function RatingsClient({
 							strokeWidth={1.5}
 							viewBox="0 0 24 24"
 						>
-							<path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+							/>
 						</svg>
 						<input
 							type="text"
@@ -272,9 +276,18 @@ export function RatingsClient({
 							key={`${item.id}-${i}`}
 							className="group flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
 						>
-							<Link href={item.href} className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800">
+							<Link
+								href={item.href}
+								className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
+							>
 								{item.posterUrl ? (
-									<Image src={item.posterUrl} alt={item.title} fill className="object-cover" sizes="40px" />
+									<Image
+										src={item.posterUrl}
+										alt={item.title}
+										fill
+										className="object-cover"
+										sizes="40px"
+									/>
 								) : (
 									<div className="flex h-full items-center justify-center text-xs text-zinc-700">
 										{item.mediaType === "movies" ? "🎬" : "📺"}
@@ -320,7 +333,11 @@ export function RatingsClient({
 							)}
 
 							<div className="shrink-0">
-								<RatingInput mediaType={item.mediaType} ids={item.ids} currentRating={item.userRating} />
+								<RatingInput
+									mediaType={item.mediaType}
+									ids={item.ids}
+									currentRating={item.userRating}
+								/>
 							</div>
 
 							<span className="hidden shrink-0 text-[11px] text-zinc-600 sm:inline">

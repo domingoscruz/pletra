@@ -89,8 +89,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
 			const shows = (showRes.body as WatchlistItem[]).map((i) => ({ ...i, type: "show" }));
 			if (type === "all") {
 				items = [...items, ...shows].sort(
-					(a, b) =>
-						new Date(b.listed_at ?? 0).getTime() - new Date(a.listed_at ?? 0).getTime(),
+					(a, b) => new Date(b.listed_at ?? 0).getTime() - new Date(a.listed_at ?? 0).getTime(),
 				);
 				const showTotalPages = parseInt(
 					String(
@@ -152,9 +151,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
 		year: item.movie?.year ?? item.show?.year,
 		rating: item.movie?.rating ?? item.show?.rating,
 		runtime: item.movie?.runtime ?? item.show?.runtime,
-		href: item.movie
-			? `/movies/${item.movie.ids?.slug}`
-			: `/shows/${item.show?.ids?.slug}`,
+		href: item.movie ? `/movies/${item.movie.ids?.slug}` : `/shows/${item.show?.ids?.slug}`,
 		posterUrl: images[i]?.poster ?? null,
 		backdropUrl: images[i]?.backdrop ?? null,
 		mediaType: item.movie ? ("movies" as const) : ("shows" as const),
@@ -169,7 +166,13 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
 					href={`/users/${slug}/lists`}
 					className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
 				>
-					<svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+					<svg
+						className="h-3.5 w-3.5"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth={1.5}
+						viewBox="0 0 24 24"
+					>
 						<path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
 					</svg>
 					All Lists

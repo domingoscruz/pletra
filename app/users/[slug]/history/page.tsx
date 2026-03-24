@@ -94,11 +94,19 @@ export default async function HistoryPage({ params, searchParams }: Props) {
 		);
 
 		const movieTotal = parseInt(
-			String((movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.("x-pagination-page-count") ?? "1"),
+			String(
+				(movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+					"x-pagination-page-count",
+				) ?? "1",
+			),
 			10,
 		);
 		const showTotal = parseInt(
-			String((showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.("x-pagination-page-count") ?? "1"),
+			String(
+				(showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+					"x-pagination-page-count",
+				) ?? "1",
+			),
 			10,
 		);
 		totalPages = Math.max(movieTotal, showTotal);
@@ -155,7 +163,9 @@ export default async function HistoryPage({ params, searchParams }: Props) {
 				return aT.localeCompare(bT);
 			}
 			case "rating":
-				return (b.movie?.rating ?? b.episode?.rating ?? 0) - (a.movie?.rating ?? a.episode?.rating ?? 0);
+				return (
+					(b.movie?.rating ?? b.episode?.rating ?? 0) - (a.movie?.rating ?? a.episode?.rating ?? 0)
+				);
 			default:
 				return new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime();
 		}
@@ -180,9 +190,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
 		year: item.movie?.year ?? item.show?.year,
 		runtime: item.movie?.runtime,
 		rating: item.movie?.rating ?? item.episode?.rating,
-		userRating: userRatingsMap.get(
-			(item.movie?.ids?.trakt ?? item.episode?.ids?.trakt) as number,
-		),
+		userRating: userRatingsMap.get((item.movie?.ids?.trakt ?? item.episode?.ids?.trakt) as number),
 		href: item.movie
 			? `/movies/${item.movie.ids?.slug}`
 			: item.episode

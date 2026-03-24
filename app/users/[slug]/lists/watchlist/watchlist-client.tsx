@@ -146,8 +146,18 @@ export function WatchlistClient({
 				<div className="ml-auto flex items-center gap-3">
 					<ViewToggle view={view} onChange={setView} />
 					<div className="relative">
-						<svg className="absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-							<path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+						<svg
+							className="absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={1.5}
+							viewBox="0 0 24 24"
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+							/>
 						</svg>
 						<input
 							type="text"
@@ -214,7 +224,13 @@ export function WatchlistClient({
 						>
 							<div className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800">
 								{item.posterUrl ? (
-									<Image src={item.posterUrl} alt={item.title} fill className="object-cover" sizes="40px" />
+									<Image
+										src={item.posterUrl}
+										alt={item.title}
+										fill
+										className="object-cover"
+										sizes="40px"
+									/>
 								) : (
 									<div className="flex h-full items-center justify-center text-xs text-zinc-700">
 										{item.type === "movie" ? "🎬" : "📺"}
@@ -222,21 +238,31 @@ export function WatchlistClient({
 								)}
 							</div>
 							<div className="min-w-0 flex-1">
-								<p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">{item.title}</p>
+								<p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
+									{item.title}
+								</p>
 								<div className="flex items-center gap-2 text-[11px] text-zinc-500">
 									{item.year && <span>{item.year}</span>}
-									<span className={`rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${item.type === "movie" ? "bg-blue-500/10 text-blue-400" : "bg-purple-500/10 text-purple-400"}`}>
+									<span
+										className={`rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${item.type === "movie" ? "bg-blue-500/10 text-blue-400" : "bg-purple-500/10 text-purple-400"}`}
+									>
 										{item.type === "movie" ? "Film" : "TV"}
 									</span>
 								</div>
 							</div>
 							{item.rating != null && (
-								<div className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${Math.round(item.rating * 10) >= 70 ? "bg-green-500/10 text-green-400" : Math.round(item.rating * 10) >= 50 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400"}`}>
+								<div
+									className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${Math.round(item.rating * 10) >= 70 ? "bg-green-500/10 text-green-400" : Math.round(item.rating * 10) >= 50 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400"}`}
+								>
 									{Math.round(item.rating * 10)}%
 								</div>
 							)}
 							<span className="hidden shrink-0 text-[11px] text-zinc-600 sm:inline">
-								Added {new Date(item.listedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+								Added{" "}
+								{new Date(item.listedAt).toLocaleDateString("en-US", {
+									month: "short",
+									day: "numeric",
+								})}
 							</span>
 						</Link>
 					))}
@@ -246,11 +272,21 @@ export function WatchlistClient({
 			{/* Pagination */}
 			{totalPages > 1 && (
 				<div className="flex items-center justify-center gap-2 pt-4">
-					<button onClick={() => navigate({ page: currentPage - 1 })} disabled={currentPage <= 1} className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30">
+					<button
+						onClick={() => navigate({ page: currentPage - 1 })}
+						disabled={currentPage <= 1}
+						className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
+					>
 						← Previous
 					</button>
-					<span className="text-xs tabular-nums text-zinc-500">Page {currentPage} of {totalPages}</span>
-					<button onClick={() => navigate({ page: currentPage + 1 })} disabled={currentPage >= totalPages} className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30">
+					<span className="text-xs tabular-nums text-zinc-500">
+						Page {currentPage} of {totalPages}
+					</span>
+					<button
+						onClick={() => navigate({ page: currentPage + 1 })}
+						disabled={currentPage >= totalPages}
+						className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
+					>
 						Next →
 					</button>
 				</div>

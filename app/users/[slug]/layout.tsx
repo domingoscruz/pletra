@@ -107,9 +107,7 @@ export default async function UserProfileLayout({ params, children }: Props) {
 					<div className="flex-1 space-y-4">
 						<div>
 							<div className="flex items-center gap-3">
-								<h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-									{displayName}
-								</h1>
+								<h1 className="text-3xl font-bold tracking-tight md:text-4xl">{displayName}</h1>
 								{user.vip && (
 									<span className="rounded-full bg-yellow-500/10 px-2.5 py-1 text-[11px] font-medium text-yellow-400 ring-1 ring-yellow-500/20">
 										VIP
@@ -134,9 +132,7 @@ export default async function UserProfileLayout({ params, children }: Props) {
 						</div>
 
 						{user.about && (
-							<p className="max-w-2xl text-sm leading-relaxed text-zinc-300">
-								{user.about}
-							</p>
+							<p className="max-w-2xl text-sm leading-relaxed text-zinc-300">{user.about}</p>
 						)}
 
 						{/* Stats */}

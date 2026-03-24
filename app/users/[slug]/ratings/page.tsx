@@ -70,9 +70,7 @@ export default async function RatingsPage({ params, searchParams }: Props) {
 		if (showsRes.status === 200)
 			allItems.push(...(showsRes.body as RatedItem[]).map((i) => ({ ...i, type: "show" })));
 		if (episodesRes.status === 200)
-			allItems.push(
-				...(episodesRes.body as RatedItem[]).map((i) => ({ ...i, type: "episode" })),
-			);
+			allItems.push(...(episodesRes.body as RatedItem[]).map((i) => ({ ...i, type: "episode" })));
 	} else if (type === "movies") {
 		const res = await client.users.ratings.movies({
 			params: { id: slug },
@@ -149,9 +147,7 @@ export default async function RatingsPage({ params, searchParams }: Props) {
 			case "rating-asc":
 				return (a.rating ?? 0) - (b.rating ?? 0);
 			case "recent":
-				return (
-					new Date(b.rated_at ?? 0).getTime() - new Date(a.rated_at ?? 0).getTime()
-				);
+				return new Date(b.rated_at ?? 0).getTime() - new Date(a.rated_at ?? 0).getTime();
 			case "title": {
 				const aTitle = a.movie?.title ?? a.show?.title ?? "";
 				const bTitle = b.movie?.title ?? b.show?.title ?? "";
@@ -172,10 +168,7 @@ export default async function RatingsPage({ params, searchParams }: Props) {
 	// Paginate
 	const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
 	const safePage = Math.min(page, totalPages);
-	const pageItems = filteredItems.slice(
-		(safePage - 1) * ITEMS_PER_PAGE,
-		safePage * ITEMS_PER_PAGE,
-	);
+	const pageItems = filteredItems.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
 
 	// Fetch images only for current page
 	const images = await Promise.all(
@@ -213,11 +206,10 @@ export default async function RatingsPage({ params, searchParams }: Props) {
 						: `/shows/${item.show?.ids?.slug}`,
 		posterUrl: images[i]?.poster ?? null,
 		backdropUrl: images[i]?.backdrop ?? null,
-		mediaType: (item.type === "movie"
-			? "movies"
-			: item.type === "show"
-				? "shows"
-				: "episodes") as "movies" | "shows" | "episodes",
+		mediaType: (item.type === "movie" ? "movies" : item.type === "show" ? "shows" : "episodes") as
+			| "movies"
+			| "shows"
+			| "episodes",
 		itemType: (item.type ?? "movie") as "movie" | "show" | "episode",
 		ids: item.movie?.ids ?? item.show?.ids ?? item.episode?.ids ?? {},
 		genres: item.movie?.genres ?? item.show?.genres ?? [],

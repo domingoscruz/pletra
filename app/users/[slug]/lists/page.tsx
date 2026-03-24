@@ -94,27 +94,19 @@ export default async function ListsPage({ params }: Props) {
 				>
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center gap-2">
-							<svg
-								className="h-4 w-4 shrink-0 text-accent"
-								fill="currentColor"
-								viewBox="0 0 24 24"
-							>
+							<svg className="h-4 w-4 shrink-0 text-accent" fill="currentColor" viewBox="0 0 24 24">
 								<path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
 							</svg>
 							<p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
 								Watchlist
 							</p>
 						</div>
-						<p className="mt-0.5 ml-6 text-xs text-zinc-500">
-							Movies and shows to watch
-						</p>
+						<p className="mt-0.5 ml-6 text-xs text-zinc-500">Movies and shows to watch</p>
 					</div>
 
 					<div className="flex shrink-0 items-center gap-4 pl-4">
 						<div className="text-right">
-							<p className="text-sm font-bold tabular-nums text-zinc-300">
-								{watchlistTotal}
-							</p>
+							<p className="text-sm font-bold tabular-nums text-zinc-300">{watchlistTotal}</p>
 							<p className="text-[9px] uppercase text-zinc-600">items</p>
 						</div>
 						<svg
@@ -124,11 +116,7 @@ export default async function ListsPage({ params }: Props) {
 							strokeWidth={1.5}
 							viewBox="0 0 24 24"
 						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M8.25 4.5l7.5 7.5-7.5 7.5"
-							/>
+							<path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
 						</svg>
 					</div>
 				</Link>
@@ -163,24 +151,18 @@ export default async function ListsPage({ params }: Props) {
 							)}
 						</div>
 						{list.description && (
-							<p className="mt-0.5 truncate text-xs text-zinc-500">
-								{list.description}
-							</p>
+							<p className="mt-0.5 truncate text-xs text-zinc-500">{list.description}</p>
 						)}
 					</div>
 
 					<div className="flex shrink-0 items-center gap-4 pl-4">
 						<div className="text-right">
-							<p className="text-sm font-bold tabular-nums text-zinc-300">
-								{list.item_count ?? 0}
-							</p>
+							<p className="text-sm font-bold tabular-nums text-zinc-300">{list.item_count ?? 0}</p>
 							<p className="text-[9px] uppercase text-zinc-600">items</p>
 						</div>
 						{(list.likes ?? 0) > 0 && (
 							<div className="text-right">
-								<p className="text-sm font-bold tabular-nums text-zinc-300">
-									{list.likes}
-								</p>
+								<p className="text-sm font-bold tabular-nums text-zinc-300">{list.likes}</p>
 								<p className="text-[9px] uppercase text-zinc-600">likes</p>
 							</div>
 						)}
@@ -200,11 +182,7 @@ export default async function ListsPage({ params }: Props) {
 							strokeWidth={1.5}
 							viewBox="0 0 24 24"
 						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M8.25 4.5l7.5 7.5-7.5 7.5"
-							/>
+							<path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
 						</svg>
 					</div>
 				</Link>
