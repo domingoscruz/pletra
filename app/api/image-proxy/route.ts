@@ -11,7 +11,12 @@ export async function GET(req: NextRequest) {
 	}
 
 	// Only allow proxying from known image domains
-	const allowed = ["walter-r2.trakt.tv", "walter.trakt.tv", "media.trakt.tv", "secure.gravatar.com"];
+	const allowed = [
+		"walter-r2.trakt.tv",
+		"walter.trakt.tv",
+		"media.trakt.tv",
+		"secure.gravatar.com",
+	];
 	let hostname: string;
 	try {
 		hostname = new URL(url).hostname;

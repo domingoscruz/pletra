@@ -52,11 +52,7 @@ export const fetchTmdbImages = cache(
  * React cache() dedupes within a single server request.
  */
 export const fetchTmdbEpisodeImages = cache(
-	async (
-		tvId: number,
-		season: number,
-		episode: number,
-	): Promise<{ still: string | null }> => {
+	async (tvId: number, season: number, episode: number): Promise<{ still: string | null }> => {
 		const res = await fetch(
 			`https://api.themoviedb.org/3/tv/${tvId}/season/${season}/episode/${episode}?api_key=${process.env.TMDB_API_KEY}`,
 			{ next: { revalidate: IMAGE_CACHE_TTL } },
@@ -78,18 +74,16 @@ export const fetchTmdbEpisodeImages = cache(
  * React cache() dedupes — if the same person appears in cast on
  * multiple components within one request, only one API call is made.
  */
-export const fetchTmdbPersonImage = cache(
-	async (tmdbId: number): Promise<string | null> => {
-		try {
-			const res = await fetch(
-				`https://api.themoviedb.org/3/person/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
-				{ next: { revalidate: IMAGE_CACHE_TTL } },
-			);
-			if (!res.ok) return null;
-			const data = await res.json<{ profile_path?: string }>();
-			return data.profile_path ? `${TMDB_IMAGE_BASE}/w185${data.profile_path}` : null;
-		} catch {
-			return null;
-		}
-	},
-);
+export const fetchTmdbPersonImage = cache(async (tmdbId: number): Promise<string | null> => {
+	try {
+		const res = await fetch(
+			`https://api.themoviedb.org/3/person/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
+			{ next: { revalidate: IMAGE_CACHE_TTL } },
+		);
+		if (!res.ok) return null;
+		const data = await res.json<{ profile_path?: string }>();
+		return data.profile_path ? `${TMDB_IMAGE_BASE}/w185${data.profile_path}` : null;
+	} catch {
+		return null;
+	}
+});
