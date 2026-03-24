@@ -5,7 +5,7 @@
  * Returns { url, unoptimized } — use `unoptimized` on the Image component
  * to skip Next.js image optimizer (which would double-fetch through the proxy).
  */
-const PROXIED_HOSTS = ["walter-r2.trakt.tv", "walter.trakt.tv"];
+const PROXIED_HOSTS = ["walter-r2.trakt.tv", "walter.trakt.tv", "media.trakt.tv"];
 
 export function proxyImageUrl(url: string | null | undefined): string | null {
 	if (!url) return null;
