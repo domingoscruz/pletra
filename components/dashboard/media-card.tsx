@@ -42,12 +42,12 @@ export function MediaCard({
 			<div className={`relative ${isPoster ? "aspect-[2/3]" : "aspect-[16/10]"}`}>
 				{imageUrl ? (
 					<>
-						<div className="skeleton absolute inset-0" />
+						<div className="skeleton absolute inset-0 z-0" />
 						<Image
 							src={imageUrl}
 							alt={title}
 							fill
-							className={`object-cover ${disableHover ? "" : "transition-transform duration-300 group-hover:scale-105"}`}
+							className={`relative z-10 object-cover ${disableHover ? "" : "transition-transform duration-300 group-hover:scale-105"}`}
 							sizes={
 								isPoster
 									? "(max-width: 640px) 33vw, 14vw"
