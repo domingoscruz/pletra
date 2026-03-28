@@ -60,18 +60,6 @@ export type ProgressShowItem = {
 
 const ITEMS_PER_PAGE = 50;
 
-// Map our sort options to Trakt API sort_by/sort_how params
-function getApiSort(sort: string): { sort_by: string; sort_how: string } {
-	switch (sort) {
-		case "title":
-			return { sort_by: "title", sort_how: "asc" };
-		case "rating":
-			return { sort_by: "show.rating", sort_how: "desc" };
-		default: // "recent"
-			return { sort_by: "watched", sort_how: "desc" };
-	}
-}
-
 export default async function ProgressPage({ params, searchParams }: Props) {
 	const { slug } = await params;
 
@@ -94,24 +82,21 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 		return <div className="text-center text-sm text-zinc-500">Sign in to view your progress.</div>;
 	}
 
-	const { sort_by, sort_how } = getApiSort(activeSort);
-
-	// When search or client-side filters are active, we need all items to filter accurately.
-	// Otherwise, paginate at the API level for efficiency.
-	const clientOnlySort = activeSort === "progress" || activeSort === "remaining";
-	const needsAllItems = !!activeSearch || activeFilter !== "all" || clientOnlySort;
+	// Only fetch all items when sort/filter/search requires client-side processing.
+	// Otherwise, use API pagination for efficiency.
+	const needsAllItems =
+		activeSort !== "recent" || activeFilter !== "all" || !!activeSearch;
 
 	let rawItems: UpNextItem[];
 	let apiTotalPages: number | null = null;
 	let apiTotalItems: number | null = null;
 
 	if (needsAllItems) {
-		// Fetch all pages
 		rawItems = [];
 		let apiPage = 1;
 		while (true) {
 			const res = await client.sync.progress.upNext.nitro({
-				query: { page: apiPage, limit: 100, intent: "continue", sort_by, sort_how },
+				query: { page: apiPage, limit: 100, intent: "continue" },
 			});
 			if (res.status !== 200) break;
 			const page = res.body as UpNextItem[];
@@ -120,15 +105,8 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 			apiPage++;
 		}
 	} else {
-		// Fetch just the current page
 		const res = await client.sync.progress.upNext.nitro({
-			query: {
-				page: currentPage,
-				limit: ITEMS_PER_PAGE,
-				intent: "continue",
-				sort_by,
-				sort_how,
-			},
+			query: { page: currentPage, limit: ITEMS_PER_PAGE, intent: "continue" },
 		});
 
 		if (res.status !== 200) {
@@ -142,7 +120,7 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 			parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10) || null;
 	}
 
-	// Fetch images for this page
+	// Fetch images
 	const images = await Promise.all(
 		rawItems.map((item) => {
 			const tmdbId = item.show?.ids?.tmdb;
@@ -179,7 +157,7 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 				: null,
 		}));
 
-	// Client-side filters on current page (search, status, progress %)
+	// Client-side filters (only applied when we fetched all)
 	if (activeSearch) {
 		const q = activeSearch.toLowerCase();
 		items = items.filter((item) => item.title.toLowerCase().includes(q));
@@ -194,8 +172,12 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 		items = items.filter((item) => item.aired > 0 && item.completed / item.aired <= 0.2);
 	}
 
-	// Client-side sorts that the API doesn't support
-	if (activeSort === "progress") {
+	// Client-side sorts
+	if (activeSort === "title") {
+		items.sort((a, b) => a.title.localeCompare(b.title));
+	} else if (activeSort === "rating") {
+		items.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+	} else if (activeSort === "progress") {
 		items.sort((a, b) => {
 			const pa = a.aired > 0 ? a.completed / a.aired : 0;
 			const pb = b.aired > 0 ? b.completed / b.aired : 0;
@@ -205,7 +187,7 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 		items.sort((a, b) => a.aired - a.completed - (b.aired - b.completed));
 	}
 
-	// Pagination: when we fetched all items, paginate client-side; otherwise use API headers
+	// Pagination
 	let paginatedItems: ProgressShowItem[];
 	let totalPages: number;
 	let totalItems: number;
