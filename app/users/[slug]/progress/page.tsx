@@ -84,8 +84,7 @@ export default async function ProgressPage({ params, searchParams }: Props) {
 
 	// Only fetch all items when sort/filter/search requires client-side processing.
 	// Otherwise, use API pagination for efficiency.
-	const needsAllItems =
-		activeSort !== "recent" || activeFilter !== "all" || !!activeSearch;
+	const needsAllItems = activeSort !== "recent" || activeFilter !== "all" || !!activeSearch;
 
 	let rawItems: UpNextItem[];
 	let apiTotalPages: number | null = null;
