@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { ProgressProvider } from "@bprogress/next/app";
 import { SettingsProvider } from "@/lib/settings";
+import { ToastProvider } from "@/lib/toast";
 
 export function Providers({ children }: { children: ReactNode }) {
 	const [queryClient] = useState(
@@ -27,7 +28,7 @@ export function Providers({ children }: { children: ReactNode }) {
 					options={{ showSpinner: false }}
 					shallowRouting
 				>
-					{children}
+					<ToastProvider>{children}</ToastProvider>
 				</ProgressProvider>
 			</SettingsProvider>
 		</QueryClientProvider>

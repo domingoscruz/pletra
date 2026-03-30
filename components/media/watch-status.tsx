@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { traktKeys } from "@/lib/queries/keys";
+import { useToast } from "@/lib/toast";
 
 interface WatchStatusProps {
 	mediaType: "movies" | "episodes";
@@ -27,6 +28,7 @@ export function WatchStatus({
 	const [watched, setWatched] = useState(initialWatched);
 	const [currentPlays, setCurrentPlays] = useState(plays ?? 0);
 	const queryClient = useQueryClient();
+	const { toast } = useToast();
 
 	const markWatched = useMutation({
 		mutationFn: async () => {
@@ -40,10 +42,17 @@ export function WatchStatus({
 			if (!res.ok) throw new Error("Failed to mark as watched");
 			return res.json();
 		},
-		onSuccess: () => {
+		onMutate: () => {
 			setWatched(true);
 			setCurrentPlays((p) => p + 1);
+		},
+		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: traktKeys.history() });
+		},
+		onError: () => {
+			setWatched(false);
+			setCurrentPlays((p) => Math.max(0, p - 1));
+			toast("Failed to mark as watched");
 		},
 	});
 
@@ -59,10 +68,22 @@ export function WatchStatus({
 			if (!res.ok) throw new Error("Failed to remove from history");
 			return res.json();
 		},
-		onSuccess: () => {
+		onMutate: () => {
+			const prevWatched = watched;
+			const prevPlays = currentPlays;
 			setWatched(false);
 			setCurrentPlays(0);
+			return { prevWatched, prevPlays };
+		},
+		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: traktKeys.history() });
+		},
+		onError: (_err, _vars, context) => {
+			if (context) {
+				setWatched(context.prevWatched);
+				setCurrentPlays(context.prevPlays);
+			}
+			toast("Failed to remove from history");
 		},
 	});
 

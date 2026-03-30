@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { createTraktClient } from "@/lib/trakt";
+import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import type { ShowSummary } from "@/lib/types";
 import { Backdrop } from "@/components/media/backdrop";
@@ -84,6 +85,37 @@ export default async function SeasonPage({ params }: Props) {
 		}),
 	);
 
+	// Fetch watched status from show progress (single efficient API call for the whole show)
+	const watchedEpisodes = new Set<number>(); // trakt episode ids that are watched
+
+	try {
+		const authClient = await getAuthenticatedTraktClient();
+		const progressRes = await authClient.shows.progress.watched({ params: { id: slug } });
+
+		if (progressRes.status === 200) {
+			type ProgressData = {
+				seasons?: Array<{
+					number?: number;
+					episodes?: Array<{ number?: number; completed?: boolean }>;
+				}>;
+			};
+			const progress = progressRes.body as ProgressData;
+			const seasonData = progress.seasons?.find((s) => s.number === seasonNumber);
+			if (seasonData?.episodes) {
+				for (const ep of seasonData.episodes) {
+					if (ep.completed && ep.number != null) {
+						const match = episodes.find((e) => e.number === ep.number);
+						if (match?.ids?.trakt) {
+							watchedEpisodes.add(match.ids.trakt);
+						}
+					}
+				}
+			}
+		}
+	} catch {
+		// Not authenticated — no user data
+	}
+
 	return (
 		<>
 			<Backdrop src={images.backdrop} alt={show.title} />
@@ -162,6 +194,8 @@ export default async function SeasonPage({ params }: Props) {
 				<div className="space-y-3">
 					{episodes.map((ep, i) => {
 						const airDate = ep.first_aired ? new Date(ep.first_aired).toLocaleDateString() : null;
+						const epTraktId = ep.ids?.trakt;
+						const isWatched = epTraktId ? watchedEpisodes.has(epTraktId) : false;
 
 						return (
 							<Link
@@ -188,10 +222,38 @@ export default async function SeasonPage({ params }: Props) {
 								<div className="flex-1 space-y-1">
 									<div className="flex items-start justify-between gap-2">
 										<div>
-											<p className="text-sm font-medium">
-												<span className="text-muted">E{ep.number}</span> {ep.title ?? "TBA"}
-											</p>
-											{airDate && <p className="text-xs text-muted">{airDate}</p>}
+											<div className="flex items-center gap-2">
+												<p className="text-sm font-medium">
+													<span className="text-muted">E{ep.number}</span> {ep.title ?? "TBA"}
+												</p>
+												{isWatched && (
+													<span className="flex shrink-0 items-center gap-1 rounded bg-green-500/20 px-1.5 py-0.5 text-[10px] font-medium leading-none text-green-400">
+														<svg
+															className="h-2.5 w-2.5"
+															fill="none"
+															stroke="currentColor"
+															strokeWidth={2.5}
+															viewBox="0 0 24 24"
+														>
+															<path
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																d="M4.5 12.75l6 6 9-13.5"
+															/>
+														</svg>
+														Watched
+													</span>
+												)}
+											</div>
+											<div className="flex items-center gap-2">
+												{airDate && <p className="text-xs text-muted">{airDate}</p>}
+												{ep.runtime && (
+													<>
+														<span className="text-xs text-zinc-700">·</span>
+														<p className="text-xs text-muted">{formatRuntime(ep.runtime)}</p>
+													</>
+												)}
+											</div>
 										</div>
 										<RatingDisplay rating={ep.rating} votes={ep.votes} size="sm" />
 									</div>
@@ -200,7 +262,6 @@ export default async function SeasonPage({ params }: Props) {
 											{ep.overview}
 										</p>
 									)}
-									{ep.runtime && <p className="text-xs text-muted">{formatRuntime(ep.runtime)}</p>}
 								</div>
 							</Link>
 						);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useWatchlist } from "@/lib/mutations/use-watchlist";
+import { useToast } from "@/lib/toast";
 
 export function WatchlistButton({
 	mediaType,
@@ -14,14 +15,21 @@ export function WatchlistButton({
 }) {
 	const [inWatchlist, setInWatchlist] = useState(initialInWatchlist);
 	const watchlist = useWatchlist();
+	const { toast } = useToast();
 
 	return (
 		<button
 			onClick={() => {
 				const action = inWatchlist ? "remove" : "add";
+				setInWatchlist(!inWatchlist);
 				watchlist.mutate(
 					{ action, type: mediaType, ids },
-					{ onSuccess: () => setInWatchlist(!inWatchlist) },
+					{
+						onError: () => {
+							setInWatchlist(inWatchlist);
+							toast(`Failed to ${action === "add" ? "add to" : "remove from"} watchlist`);
+						},
+					},
 				);
 			}}
 			disabled={watchlist.isPending}

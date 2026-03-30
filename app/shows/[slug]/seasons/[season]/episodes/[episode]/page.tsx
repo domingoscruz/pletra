@@ -465,6 +465,7 @@ export default async function EpisodePage({ params }: Props) {
 						slug={slug}
 						seasonNumber={seasonNumber}
 						episodeNumber={episodeNumber}
+						entityIds={episode.ids}
 					/>
 				</div>
 			</div>

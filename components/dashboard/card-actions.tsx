@@ -5,6 +5,7 @@ import { useRate } from "@/lib/mutations/use-rate";
 import { useMarkWatched } from "@/lib/mutations/use-mark-watched";
 import { useWatchlist } from "@/lib/mutations/use-watchlist";
 import { StarRating } from "@/components/ui/star-rating";
+import { useToast } from "@/lib/toast";
 
 interface CardActionsProps {
 	mediaType: "movies" | "shows" | "episodes";
@@ -27,6 +28,7 @@ export function CardActions({
 	const rate = useRate();
 	const markWatched = useMarkWatched();
 	const watchlist = useWatchlist();
+	const { toast } = useToast();
 
 	const watchedType = mediaType === "shows" ? "episodes" : mediaType;
 
@@ -43,7 +45,10 @@ export function CardActions({
 						value={userRating}
 						size="sm"
 						onChange={(rating) => {
-							rate.mutate({ type: mediaType, ids, rating });
+							rate.mutate(
+								{ type: mediaType, ids, rating },
+								{ onError: () => toast("Failed to save rating") },
+							);
 							setShowRating(false);
 							onRated?.();
 						}}
@@ -73,7 +78,16 @@ export function CardActions({
 					onClick={(e) => {
 						e.preventDefault();
 						e.stopPropagation();
-						markWatched.mutate({ type: watchedType, ids }, { onSuccess: () => setWatched(true) });
+						setWatched(true);
+						markWatched.mutate(
+							{ type: watchedType, ids },
+							{
+								onError: () => {
+									setWatched(false);
+									toast("Failed to mark as watched");
+								},
+							},
+						);
 					}}
 					disabled={markWatched.isPending || watched}
 					className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-full transition-all hover:scale-110 disabled:opacity-50 ${
@@ -99,9 +113,16 @@ export function CardActions({
 						e.stopPropagation();
 						const action = inWatchlist ? "remove" : "add";
 						const wlType = mediaType === "episodes" ? "shows" : mediaType;
+						const prev = inWatchlist;
+						setInWatchlist(!inWatchlist);
 						watchlist.mutate(
 							{ action, type: wlType, ids },
-							{ onSuccess: () => setInWatchlist(!inWatchlist) },
+							{
+								onError: () => {
+									setInWatchlist(prev);
+									toast(`Failed to ${action === "add" ? "add to" : "remove from"} watchlist`);
+								},
+							},
 						);
 					}}
 					disabled={watchlist.isPending}

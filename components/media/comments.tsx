@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ProxiedImage as Image } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { proxyImageUrl } from "@/lib/image-proxy";
+import { useToast } from "@/lib/toast";
 
 interface CommentUser {
 	username?: string;
@@ -33,6 +34,8 @@ interface CommentsProps {
 	slug: string;
 	seasonNumber?: number;
 	episodeNumber?: number;
+	/** Trakt IDs for the entity — needed for episode comments to target the right entity */
+	entityIds?: Record<string, unknown>;
 	defaultCount?: number;
 }
 
@@ -41,6 +44,7 @@ export function Comments({
 	slug,
 	seasonNumber,
 	episodeNumber,
+	entityIds,
 	defaultCount = 5,
 }: CommentsProps) {
 	const [comments, setComments] = useState<CommentData[]>([]);
@@ -141,23 +145,21 @@ export function Comments({
 		[expandedReplies, repliesMap],
 	);
 
+	const { toast } = useToast();
 	const [newComment, setNewComment] = useState("");
 	const [submitting, setSubmitting] = useState(false);
-	const [submitError, setSubmitError] = useState<string | null>(null);
 	const [isSpoiler, setIsSpoiler] = useState(false);
 
 	const submitComment = useCallback(async () => {
 		if (!newComment.trim() || submitting) return;
 		setSubmitting(true);
-		setSubmitError(null);
 		try {
 			const body: Record<string, unknown> = {
 				comment: newComment.trim(),
 				spoiler: isSpoiler,
 			};
-			if (mediaType === "episodes" && seasonNumber != null && episodeNumber != null) {
-				body.show = { ids: { slug } };
-				body.episode = { season: seasonNumber, number: episodeNumber };
+			if (mediaType === "episodes" && entityIds) {
+				body.episode = { ids: entityIds };
 			} else if (mediaType === "shows") {
 				body.show = { ids: { slug } };
 			} else {
@@ -169,31 +171,32 @@ export function Comments({
 				body: JSON.stringify(body),
 			});
 			if (!res.ok) {
-				const err = await res.text();
-				throw new Error(err || "Failed to post comment");
+				const errText = await res.text();
+				let message = "Failed to post comment";
+				if (res.status === 422) {
+					message = "Comments must be at least 5 words long.";
+				} else if (errText) {
+					try {
+						const parsed = JSON.parse(errText);
+						message = parsed.error || parsed.message || errText;
+					} catch {
+						message = errText;
+					}
+				}
+				throw new Error(message);
 			}
+			const posted = (await res.json()) as CommentData;
 			setNewComment("");
 			setIsSpoiler(false);
-			// Refresh comments
-			setPage(1);
-			setComments([]);
-			void fetchComments(1, sort);
+			// Optimistically add the new comment to the top
+			setComments((prev) => [posted, ...prev]);
+			setTotalLoaded((prev) => prev + 1);
 		} catch (e) {
-			setSubmitError(e instanceof Error ? e.message : "Failed to post comment");
+			toast(e instanceof Error ? e.message : "Failed to post comment");
 		} finally {
 			setSubmitting(false);
 		}
-	}, [
-		newComment,
-		submitting,
-		isSpoiler,
-		mediaType,
-		slug,
-		seasonNumber,
-		episodeNumber,
-		sort,
-		fetchComments,
-	]);
+	}, [newComment, submitting, isSpoiler, mediaType, slug, entityIds]);
 
 	const sortOptions: { value: SortMode; label: string }[] = [
 		{ value: "likes", label: "Top" },
@@ -287,7 +290,6 @@ export function Comments({
 				/>
 				{newComment.trim() && (
 					<div className="flex items-center justify-end gap-3">
-						{submitError && <span className="text-xs text-red-400">{submitError}</span>}
 						<button
 							onClick={() => setIsSpoiler(!isSpoiler)}
 							className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] transition-colors ${

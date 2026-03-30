@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, type ReactNode } from "react";
+import Link from "@/components/ui/link";
 
 interface CardGridProps {
 	title: string;
@@ -8,6 +9,7 @@ interface CardGridProps {
 	rowSize?: number;
 	defaultRows?: number;
 	gridClass?: string;
+	titleHref?: string;
 }
 
 export function CardGrid({
@@ -16,6 +18,7 @@ export function CardGrid({
 	rowSize = 6,
 	defaultRows = 3,
 	gridClass,
+	titleHref,
 }: CardGridProps) {
 	const [page, setPage] = useState(0);
 	const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
@@ -93,7 +96,25 @@ export function CardGrid({
 	return (
 		<div onWheel={handleWheel}>
 			<div className="mb-3 flex items-center gap-3">
-				<h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-200">{title}</h2>
+				{titleHref ? (
+					<Link
+						href={titleHref}
+						className="group flex items-center gap-1.5 text-sm font-semibold uppercase tracking-widest text-zinc-200 transition-colors hover:text-white"
+					>
+						{title}
+						<svg
+							className="h-3.5 w-3.5 text-zinc-500 transition-colors group-hover:text-white"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth={2}
+							viewBox="0 0 24 24"
+						>
+							<path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+						</svg>
+					</Link>
+				) : (
+					<h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-200">{title}</h2>
+				)}
 				<div className="h-px flex-1 bg-zinc-700/50" />
 				{totalPages > 1 && (
 					<div className="flex items-center gap-1.5">

@@ -1,6 +1,7 @@
 import { ProxiedImage as Image } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { createTraktClient } from "@/lib/trakt";
+import { isCurrentUser } from "@/lib/trakt-server";
 import { Backdrop } from "@/components/media/backdrop";
 import { proxyImageUrl } from "@/lib/image-proxy";
 import { ProfileTabs } from "./profile-tabs";
@@ -39,6 +40,7 @@ interface Props {
 export default async function UserProfileLayout({ params, children }: Props) {
 	const { slug } = await params;
 	const client = createTraktClient();
+	const isOwnProfile = await isCurrentUser(slug);
 
 	const [profileRes, statsRes] = await Promise.all([
 		client.users.profile({
@@ -196,7 +198,7 @@ export default async function UserProfileLayout({ params, children }: Props) {
 				{/* Tabs */}
 				{!user.private && (
 					<div className="mt-10">
-						<ProfileTabs slug={slug} />
+						<ProfileTabs slug={slug} isOwnProfile={isOwnProfile} />
 						<div className="mt-8">{children}</div>
 					</div>
 				)}

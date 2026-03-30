@@ -56,3 +56,36 @@ export async function getOptionalTraktClient(): Promise<TraktClient> {
 	const accessToken = await getAccessToken();
 	return createTraktClient(accessToken ?? undefined);
 }
+
+/**
+ * Returns identifiers for the current authenticated user, or null if not logged in.
+ * Includes both the username (used in profile URLs) and the Trakt slug (session id).
+ */
+export const getCurrentUser = cache(
+	async (): Promise<{ username: string; slug: string } | null> => {
+		try {
+			const h = await headers();
+			const session = await auth.api.getSession({ headers: h });
+			if (!session?.user) return null;
+
+			const email = session.user.email ?? "";
+			const username = email.endsWith("@trakt.tv") ? email.replace(/@trakt\.tv$/, "") : "";
+			const slug = session.user.id ?? "";
+
+			if (!username && !slug) return null;
+			return { username: username || slug, slug: slug || username };
+		} catch {
+			return null;
+		}
+	},
+);
+
+/**
+ * Check if a profile slug belongs to the current user.
+ */
+export async function isCurrentUser(profileSlug: string): Promise<boolean> {
+	const user = await getCurrentUser();
+	if (!user) return false;
+	const lower = profileSlug.toLowerCase();
+	return user.username.toLowerCase() === lower || user.slug.toLowerCase() === lower;
+}
