@@ -1,55 +1,60 @@
 {
-	"name": "pletra",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"dev": "next dev",
-		"dev:vinext": "vinext dev",
-		"build": "next build",
-		"build:vinext": "vinext build",
-		"start": "next start",
-		"start:vinext": "vinext start",
-		"prepare": "vp config"
-	},
-	"dependencies": {
-		"@bprogress/next": "^3.2.12",
-		"@tailwindcss/vite": "^4.2.2",
-		"@tanstack/react-query": "^5.94.5",
-		"@trakt/api": "jsr:^0.3.10",
-		"@vercel/next": "^4.16.3",
-		"better-auth": "^1.5.6",
-		"next": "16.2.1",
-		"react": "19.2.4",
-		"react-dom": "19.2.4"
-	},
-	"devDependencies": {
-		"@cloudflare/vite-plugin": "^1.30.0",
-		"@cloudflare/workers-types": "^4.20260317.1",
-		"@tailwindcss/postcss": "^4",
-		"@types/node": "^20",
-		"@types/react": "^19",
-		"@types/react-dom": "^19",
-		"@vitejs/plugin-react": "^6.0.1",
-		"@vitejs/plugin-rsc": "^0.5.21",
-		"eslint": "^9",
-		"eslint-config-next": "16.2.1",
-		"react-server-dom-webpack": "^19.2.4",
-		"tailwindcss": "^4",
-		"typescript": "^5",
-		"vinext": "^0.0.35",
-		"vite": "npm:@voidzero-dev/vite-plus-core@^0.1.13",
-		"vite-plus": "latest",
-		"wrangler": "^4.76.0"
-	},
-	"packageManager": "pnpm@10.32.1",
-	"pnpm": {
-		"overrides": {
-			"vite": "npm:@voidzero-dev/vite-plus-core@latest",
-			"vitest": "npm:@voidzero-dev/vite-plus-test@latest"
-		},
-		"onlyBuiltDependencies": [
-			"better-sqlite3"
-		]
-	}
+  "name": "pletra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "dev:vinext": "vinext dev",
+    "build": "next build",
+    "build:vinext": "vinext build",
+    "start": "next start",
+    "start:vinext": "vinext start",
+    "prepare": "vp config"
+  },
+  "dependencies": {
+    "@bprogress/next": "^3.2.12",
+    "@tanstack/react-query": "^5.94.5",
+    "@trakt/api": "jsr:^0.3.10",
+    "@vercel/next": "^4.16.3",
+    "better-auth": "^1.5.6",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.7.0",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.30.0",
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@tailwindcss/postcss": "^4",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-rsc": "^0.5.21",
+    "autoprefixer": "^10.4.27",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "postcss": "^8.5.8",
+    "react-server-dom-webpack": "^19.2.4",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5",
+    "vinext": "^0.0.35",
+    "vite": "^8.0.3",
+    "vite-plus": "latest",
+    "wrangler": "^4.76.0"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "pnpm": {
+    "overrides": {
+      "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+      "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
 }

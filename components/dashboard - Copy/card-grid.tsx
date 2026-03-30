@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useRef, useCallback, type ReactNode } from "react";
+import Link from "@/components/ui/link";
 
 interface CardGridProps {
-  title: string | ReactNode;
+  title: string;
   children: ReactNode[];
   rowSize?: number;
   defaultRows?: number;
   gridClass?: string;
+  titleHref?: string;
 }
 
 export function CardGrid({
@@ -16,6 +18,7 @@ export function CardGrid({
   rowSize = 6,
   defaultRows = 3,
   gridClass,
+  titleHref,
 }: CardGridProps) {
   const [page, setPage] = useState(0);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
@@ -26,11 +29,13 @@ export function CardGrid({
   const hasNext = page < totalPages - 1;
   const hasPrev = page > 0;
 
+  // Refs for swipe gesture - use a "locked" approach
   const swipeAccum = useRef(0);
   const swipeLocked = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animating = useRef(false);
 
+  // Use refs for page bounds so the wheel handler always has current values
   const pageRef = useRef(page);
   pageRef.current = page;
   const totalPagesRef = useRef(totalPages);
@@ -55,15 +60,18 @@ export function CardGrid({
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
+      // Only respond to horizontal swipes (trackpad gesture)
       if (Math.abs(e.deltaX) < Math.abs(e.deltaY) * 0.5) return;
       if (Math.abs(e.deltaX) < 2) return;
 
+      // Reset idle timer - when trackpad stops sending events, unlock
       if (idleTimer.current) clearTimeout(idleTimer.current);
       idleTimer.current = setTimeout(() => {
         swipeLocked.current = false;
         swipeAccum.current = 0;
       }, 300);
 
+      // If locked (we already triggered a page change this gesture), ignore
       if (swipeLocked.current) return;
 
       swipeAccum.current += e.deltaX;
@@ -71,11 +79,11 @@ export function CardGrid({
       const threshold = 50;
       if (swipeAccum.current > threshold) {
         swipeAccum.current = 0;
-        swipeLocked.current = true;
+        swipeLocked.current = true; // Lock until gesture ends
         changePage("right");
       } else if (swipeAccum.current < -threshold) {
         swipeAccum.current = 0;
-        swipeLocked.current = true;
+        swipeLocked.current = true; // Lock until gesture ends
         changePage("left");
       }
     },
@@ -86,65 +94,50 @@ export function CardGrid({
     "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
 
   return (
-    <div onWheel={handleWheel} className="w-full overflow-hidden">
-      {/* HEADER SECTION - strictly ordered: Title -> Line -> Pagination */}
-      <div className="mb-3 flex w-full items-center gap-4">
-        <h2 className="shrink-0 text-[14px] font-black uppercase tracking-wider text-zinc-200">
-          {title}
-        </h2>
-
-        {/* THE SPRING LINE - This MUST be in the middle */}
+    <div onWheel={handleWheel}>
+      <div className="mb-3 flex items-center gap-3">
+        {titleHref ? (
+          <Link
+            href={titleHref}
+            className="group flex items-center gap-1.5 text-sm font-semibold uppercase tracking-widest text-zinc-200 transition-colors hover:text-white"
+          >
+            {title}
+            <svg
+              className="h-3.5 w-3.5 text-zinc-500 transition-colors group-hover:text-white"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </Link>
+        ) : (
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-200">{title}</h2>
+        )}
         <div className="h-px flex-1 bg-zinc-700/50" />
-
         {totalPages > 1 && (
-          <div className="flex shrink-0 items-center gap-4 tabular-nums">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
-              <span className="text-zinc-200">{page + 1}</span> / {totalPages}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] tabular-nums text-zinc-400">
+              {page + 1}/{totalPages}
             </span>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => changePage("left")}
-                disabled={!hasPrev}
-                className="p-1 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
-              <button
-                onClick={() => changePage("right")}
-                disabled={!hasNext}
-                className="p-1 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
-              </button>
-            </div>
+            <button
+              onClick={() => changePage("left")}
+              disabled={!hasPrev}
+              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-xs text-zinc-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-20"
+            >
+              ‹
+            </button>
+            <button
+              onClick={() => changePage("right")}
+              disabled={!hasNext}
+              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-xs text-zinc-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-20"
+            >
+              ›
+            </button>
           </div>
         )}
       </div>
-
-      {/* GRID SECTION */}
       <div
         className={`${gridClass ?? defaultGrid} transition-all duration-200 ease-out ${
           animDir === "right"

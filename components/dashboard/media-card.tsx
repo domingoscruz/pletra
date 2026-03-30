@@ -1,114 +1,258 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "@/components/ui/link";
 import { CardImage } from "./card-image";
 import { CardActions } from "./card-actions";
+import { cn } from "@/lib/utils";
+
+const RIBBON_COLORS: Record<number, string> = {
+  10: "#ed1c24",
+  9: "#df252e",
+  8: "#d22f37",
+  7: "#c43841",
+  6: "#b6424a",
+  5: "#a84b54",
+  4: "#9a555d",
+  3: "#8d5e67",
+  2: "#7f6870",
+  1: "#71717a",
+};
+
+// Map Trakt Nitro Completion color to special tags
+const SPECIAL_TAG_COLORS: Record<string, string> = {
+  "Series Premiere": "bg-[#60a5fa]",
+  "Season Premiere": "bg-[#45b449]",
+  "Season Finale": "bg-[#ef4444]",
+  "Series Finale": "bg-[#9b1d9c]",
+  // New: Match the vibrant Trakt Nitro checkmark purple (#9333ea)
+  "New Episode":
+    "bg-[#9333ea] text-white bottom-2.5 right-2.5 rounded px-2.5 py-1.5 text-[11px] shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10",
+};
 
 export interface MediaCardProps {
-	title: string;
-	subtitle?: string;
-	href: string;
-	backdropUrl: string | null;
-	posterUrl?: string | null;
-	rating?: number;
-	userRating?: number;
-	mediaType: "movies" | "shows" | "episodes";
-	ids: Record<string, unknown>;
-	progress?: { aired: number; completed: number };
-	timestamp?: string;
-	variant?: "landscape" | "poster";
-	disableHover?: boolean;
+  title: string;
+  subtitle?: string | React.ReactNode;
+  href: string;
+  showHref?: string;
+  backdropUrl: string | null;
+  posterUrl?: string | null;
+  rating?: number;
+  userRating?: number;
+  mediaType: "movies" | "shows" | "episodes";
+  ids: Record<string, unknown>;
+  episodeIds?: Record<string, unknown>;
+  releasedAt?: string;
+  progress?: { aired: number; completed: number };
+  variant?: "landscape" | "poster";
+  disableHover?: boolean;
+  showInlineActions?: boolean;
+  specialTag?:
+    | "Series Premiere"
+    | "Season Premiere"
+    | "Season Finale"
+    | "Series Finale"
+    | "New Episode";
+  badge?: string;
+  isWatched?: boolean;
+  priority?: boolean;
 }
 
 export function MediaCard({
-	title,
-	subtitle,
-	href,
-	backdropUrl,
-	posterUrl,
-	rating,
-	userRating,
-	mediaType,
-	ids,
-	progress,
-	timestamp,
-	variant = "landscape",
-	disableHover = false,
+  title,
+  subtitle,
+  href,
+  showHref,
+  backdropUrl,
+  posterUrl,
+  rating,
+  userRating,
+  mediaType,
+  ids,
+  episodeIds,
+  releasedAt,
+  progress,
+  variant = "landscape",
+  disableHover = false,
+  showInlineActions = false,
+  specialTag,
+  badge,
+  isWatched = false,
+  priority = false,
 }: MediaCardProps) {
-	const ratingPercent = rating != null ? Math.round(rating * 10) : null;
-	const isPoster = variant === "poster";
-	const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
+  const isPoster = variant === "poster";
+  const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
+  const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
 
-	return (
-		<Link href={href} className="group relative overflow-hidden rounded-lg bg-zinc-900">
-			<div className={`relative ${isPoster ? "aspect-[2/3]" : "aspect-[16/10]"}`}>
-				{imageUrl ? (
-					<CardImage
-						src={imageUrl}
-						alt={title}
-						sizes={
-							isPoster
-								? "(max-width: 640px) 33vw, 14vw"
-								: "(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
-						}
-						disableHover={disableHover}
-					/>
-				) : (
-					<div className="flex h-full items-center justify-center bg-zinc-800/80 text-muted">
-						<span className="text-xl">🎬</span>
-					</div>
-				)}
+  // Hover Logic (Fixed Regression)
+  const [isHovered, setIsHovered] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
+  const barRef = useRef<HTMLDivElement>(null);
 
-				{/* Ratings - top right stack */}
-				<div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1">
-					{ratingPercent != null && (
-						<div
-							className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-								ratingPercent >= 70
-									? "bg-green-500/90 text-white"
-									: ratingPercent >= 50
-										? "bg-yellow-500/90 text-black"
-										: "bg-red-500/90 text-white"
-							}`}
-						>
-							{ratingPercent}%
-						</div>
-					)}
-					{userRating != null && (
-						<div className="rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-900">
-							★ {userRating}
-						</div>
-					)}
-				</div>
+  useEffect(() => {
+    setOptimisticRating(userRating);
+  }, [userRating]);
 
-				{/* Timestamp - top left */}
-				{timestamp && (
-					<div className="absolute top-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] leading-none text-zinc-300 backdrop-blur-sm">
-						{timestamp}
-					</div>
-				)}
+  const handleMouseEnter = () => {
+    if (barRef.current) {
+      const rect = barRef.current.getBoundingClientRect();
+      setBarMidpoint({
+        x: rect.left + window.scrollX + rect.width / 2,
+        y: rect.top + window.scrollY,
+      });
+    }
+    setIsHovered(true);
+  };
 
-				{/* Title overlay */}
-				<div
-					className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-2.5 pb-2 ${isPoster ? "pt-16" : "pt-10"}`}
-				>
-					<p className="truncate text-xs font-semibold leading-tight text-white">{title}</p>
-					{subtitle && (
-						<p className="mt-0.5 truncate text-[10px] leading-tight text-zinc-400">{subtitle}</p>
-					)}
-				</div>
+  const handleMouseMove = (e: React.MouseEvent) => {
+    setMousePos({ x: e.pageX, y: e.pageY });
+  };
 
-				{/* Progress bar */}
-				{progress && progress.aired > 0 && (
-					<div className="absolute inset-x-0 bottom-0 h-[3px] bg-zinc-800/60">
-						<div
-							className="h-full bg-accent"
-							style={{ width: `${(progress.completed / progress.aired) * 100}%` }}
-						/>
-					</div>
-				)}
+  const handleRate = (newRating: number) => {
+    setOptimisticRating(newRating === 0 ? undefined : newRating);
+    window.dispatchEvent(new Event("trakt-checkin-updated"));
+  };
 
-				{/* Hover actions */}
-				{!disableHover && <CardActions mediaType={mediaType} ids={ids} userRating={userRating} />}
-			</div>
-		</Link>
-	);
+  const aired = progress?.aired ?? 0;
+  const completed = progress?.completed ?? 0;
+  const displayAired = aired > 0 ? aired : completed > 0 ? completed : 0;
+  const percentage =
+    displayAired > 0 ? Math.min(100, Math.round((completed / displayAired) * 100)) : 0;
+  const remaining = Math.max(0, aired - completed);
+
+  const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
+  const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
+
+  return (
+    <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
+      <div className="relative">
+        <Link
+          href={href}
+          className="relative overflow-hidden rounded-t-lg bg-zinc-900 block border border-white/5 transition-all hover:border-white/20 active:scale-[0.98]"
+        >
+          <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
+            {imageUrl ? (
+              <CardImage
+                src={imageUrl}
+                alt={title}
+                disableHover={disableHover}
+                priority={priority}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center bg-zinc-800 text-xl text-zinc-500">
+                🎬
+              </div>
+            )}
+
+            {specialTag && (
+              <div
+                className={cn(
+                  "absolute z-40 flex font-black uppercase tracking-widest ring-1 ring-black/20 shadow-xl leading-none",
+                  specialTag === "New Episode"
+                    ? "" // Bottom/Right handled by color map
+                    : "inset-x-0 top-0 h-[22px] items-center justify-center text-[10px] text-white",
+                  SPECIAL_TAG_COLORS[specialTag],
+                )}
+              >
+                {specialTag}
+              </div>
+            )}
+
+            {showInlineActions && optimisticRating != null && (
+              <div
+                className="absolute top-0 right-0 z-10 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none"
+                style={{ borderTopColor: RIBBON_COLORS[optimisticRating] }}
+              >
+                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-bold text-white tabular-nums">
+                  {optimisticRating}
+                </span>
+              </div>
+            )}
+
+            {badge && specialTag !== "New Episode" && (
+              <div className="absolute top-2 left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none">
+                {badge}
+              </div>
+            )}
+          </div>
+        </Link>
+
+        {displayAired > 0 && (
+          <div
+            ref={barRef}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={() => setIsHovered(false)}
+            onMouseMove={handleMouseMove}
+            className="group/progress absolute inset-x-0 bottom-0 z-50 h-[4px] cursor-default transition-all hover:h-[8px]"
+          >
+            <div
+              className="h-full bg-red-600 shadow-[0_0_8px_rgba(239,68,68,0.4)] transition-all duration-300 group-hover/progress:bg-red-500"
+              style={{ width: `${percentage}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {isHovered &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"
+            style={{
+              top: `${targetY - 35}px`,
+              left: `${targetX}px`,
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-red-500">{percentage}% Watched</span>
+              <span className="text-zinc-600">•</span>
+              <span>
+                {remaining} {remaining === 1 ? "Episode" : "Episodes"} Left
+              </span>
+            </div>
+            <div className="absolute top-full left-1/2 -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+          </div>,
+          document.body,
+        )}
+
+      {!disableHover && showInlineActions && (
+        <div className="mt-2 flex w-full flex-col items-center px-1 text-center">
+          <Link
+            href={href}
+            className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-red-500"
+          >
+            {mediaType !== "movies" ? subtitle : title}
+          </Link>
+
+          {mediaType !== "movies" && showHref ? (
+            <Link
+              href={showHref}
+              className="mt-1 block w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
+            >
+              {title}
+            </Link>
+          ) : (
+            <p className="mt-1 w-full truncate text-[11px] font-medium leading-tight text-zinc-400">
+              {mediaType !== "movies" ? title : subtitle}
+            </p>
+          )}
+
+          <div className="mt-2 w-full">
+            <CardActions
+              mediaType={mediaType}
+              ids={ids}
+              episodeIds={episodeIds}
+              userRating={optimisticRating || undefined}
+              globalRating={rating ? Math.round(rating * 10) : null}
+              releasedAt={releasedAt}
+              isWatched={isWatched}
+              onRate={handleRate}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

@@ -1,152 +1,127 @@
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
-import { formatRuntime } from "@/lib/format";
-import { MediaCard, type MediaCardProps } from "./media-card";
 import { CardGrid } from "./card-grid";
+import { MediaCard } from "./media-card";
 
 export async function RecentActivity() {
-	const client = await getAuthenticatedTraktClient();
+  const client = await getAuthenticatedTraktClient();
 
-	const [showRes, movieRes, epRatingsRes, movieRatingsRes] = await Promise.all([
-		client.users.history.shows({
-			params: { id: "me" },
-			query: { page: 1, limit: 25, extended: "full" },
-		}),
-		client.users.history.movies({
-			params: { id: "me" },
-			query: { page: 1, limit: 25, extended: "full" },
-		}),
-		client.users.ratings.episodes({ params: { id: "me" } }).catch(() => null),
-		client.users.ratings.movies({ params: { id: "me" } }).catch(() => null),
-	]);
+  const [showRes, movieRes, epRatingsRes] = await Promise.all([
+    client.users.history.shows({ params: { id: "me" }, query: { limit: 20, extended: "full" } }),
+    client.users.history.movies({ params: { id: "me" }, query: { limit: 10, extended: "full" } }),
+    client.users.ratings.episodes({ params: { id: "me" } }).catch(() => null),
+  ]);
 
-	const showHistory = showRes.status === 200 ? showRes.body : [];
-	const movieHistory = movieRes.status === 200 ? movieRes.body : [];
+  const showHistory = showRes.status === 200 ? showRes.body : [];
+  const movieHistory = movieRes.status === 200 ? movieRes.body : [];
+  const epRatingMap = new Map<number, number>();
 
-	// Build rating lookup maps
-	type RatedEp = { episode?: { ids?: { trakt?: number } }; rating?: number };
-	type RatedMovie = { movie?: { ids?: { trakt?: number } }; rating?: number };
-	const epRatingMap = new Map<number, number>();
-	const movieRatingMap = new Map<number, number>();
+  if (epRatingsRes?.status === 200) {
+    for (const r of epRatingsRes.body as any[]) {
+      if (r.episode?.ids?.trakt && r.rating) epRatingMap.set(r.episode.ids.trakt, r.rating);
+    }
+  }
 
-	if (epRatingsRes?.status === 200) {
-		for (const r of epRatingsRes.body as RatedEp[]) {
-			if (r.episode?.ids?.trakt && r.rating) epRatingMap.set(r.episode.ids.trakt, r.rating);
-		}
-	}
-	if (movieRatingsRes?.status === 200) {
-		for (const r of movieRatingsRes.body as RatedMovie[]) {
-			if (r.movie?.ids?.trakt && r.rating) movieRatingMap.set(r.movie.ids.trakt, r.rating);
-		}
-	}
+  const allHistory = [
+    ...(showHistory as any[]).map((h) => ({ ...h, type: "episode" as const })),
+    ...(movieHistory as any[]).map((h) => ({ ...h, type: "movie" as const })),
+  ]
+    .sort((a, b) => new Date(b.watched_at).getTime() - new Date(a.watched_at).getTime())
+    .slice(0, 20);
 
-	type HistoryItem = {
-		id: number;
-		watched_at: string;
-		show?: { title?: string; ids?: { slug?: string; tmdb?: number; trakt?: number } };
-		episode?: {
-			season?: number;
-			number?: number;
-			title?: string;
-			rating?: number;
-			ids?: { trakt?: number };
-		};
-		movie?: {
-			title?: string;
-			year?: number;
-			runtime?: number;
-			rating?: number;
-			ids?: { slug?: string; tmdb?: number; trakt?: number };
-		};
-	};
+  if (allHistory.length === 0) return null;
 
-	const allHistory = [
-		...(showHistory as HistoryItem[]).map((h) => ({ ...h, type: "episode" as const })),
-		...(movieHistory as HistoryItem[]).map((h) => ({ ...h, type: "movie" as const })),
-	]
-		.sort((a, b) => new Date(b.watched_at).getTime() - new Date(a.watched_at).getTime())
-		.slice(0, 24);
+  const items = await Promise.all(
+    allHistory.map(async (item) => {
+      const isEpisode = item.type === "episode";
+      const tmdbId = isEpisode ? item.show?.ids?.tmdb : item.movie?.ids?.tmdb;
 
-	// Fetch unique backdrops
-	const imageMap = new Map<string, { poster: string | null; backdrop: string | null }>();
-	const seen = new Set<string>();
-	await Promise.all(
-		allHistory.map(async (item) => {
-			const key =
-				item.type === "episode" ? `tv-${item.show?.ids?.tmdb}` : `movie-${item.movie?.ids?.tmdb}`;
-			if (seen.has(key)) return;
-			seen.add(key);
-			const tmdbId = item.type === "episode" ? item.show?.ids?.tmdb : item.movie?.ids?.tmdb;
-			const mediaType = item.type === "episode" ? "tv" : "movie";
-			if (tmdbId) {
-				const imgs = await fetchTmdbImages(tmdbId, mediaType as "tv" | "movie");
-				imageMap.set(key, imgs);
-			}
-		}),
-	);
+      let finalImageUrl: string | null = null;
 
-	function formatTime(dateStr: string) {
-		const date = new Date(dateStr);
-		const now = new Date();
-		const diff = now.getTime() - date.getTime();
-		const mins = Math.floor(diff / 60000);
-		const hours = Math.floor(mins / 60);
-		const days = Math.floor(hours / 24);
-		if (mins < 1) return "Just now";
-		if (mins < 60) return `${mins}m`;
-		if (hours < 24) return `${hours}h`;
-		if (days < 7) return `${days}d`;
-		return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-	}
+      if (isEpisode && tmdbId) {
+        // Fetch both episode-specific and show-level images for better fallbacks
+        const [epImgs, showImgs] = await Promise.all([
+          fetchTmdbImages(tmdbId, "tv", item.episode?.season, item.episode?.number),
+          fetchTmdbImages(tmdbId, "tv"),
+        ]);
 
-	const items: MediaCardProps[] = allHistory.map((item) => {
-		const isEpisode = item.type === "episode";
-		const title = isEpisode ? (item.show?.title ?? "Unknown") : (item.movie?.title ?? "Unknown");
-		let subtitle = "";
-		if (isEpisode && item.episode) {
-			subtitle = `S${String(item.episode.season).padStart(2, "0")}E${String(item.episode.number).padStart(2, "0")}`;
-			if (item.episode.title) subtitle += ` · ${item.episode.title}`;
-		} else if (item.movie) {
-			const parts: string[] = [];
-			if (item.movie.year) parts.push(String(item.movie.year));
-			if (item.movie.runtime) parts.push(formatRuntime(item.movie.runtime));
-			subtitle = parts.join(" · ");
-		}
-		const href = isEpisode
-			? `/shows/${item.show?.ids?.slug}/seasons/${item.episode?.season}/episodes/${item.episode?.number}`
-			: `/movies/${item.movie?.ids?.slug}`;
-		const imgKey = isEpisode ? `tv-${item.show?.ids?.tmdb}` : `movie-${item.movie?.ids?.tmdb}`;
-		const imgs = imageMap.get(imgKey);
+        // Priority: Episode Still -> Show Backdrop -> Season Poster -> Show Poster
+        finalImageUrl =
+          epImgs?.still || showImgs?.backdrop || epImgs?.poster || showImgs?.poster || null;
+      } else if (tmdbId) {
+        // Standard movie image fetch
+        const movieImgs = await fetchTmdbImages(tmdbId, "movie");
+        finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
+      }
 
-		// Look up user rating by the specific episode or movie trakt ID
-		const userRating = isEpisode
-			? item.episode?.ids?.trakt
-				? epRatingMap.get(item.episode.ids.trakt)
-				: undefined
-			: item.movie?.ids?.trakt
-				? movieRatingMap.get(item.movie.ids.trakt)
-				: undefined;
+      const title = isEpisode ? (item.show?.title ?? "Unknown") : (item.movie?.title ?? "Unknown");
+      const epLabel = isEpisode
+        ? `${item.episode.season}×${String(item.episode.number).padStart(2, "0")}`
+        : "";
 
-		return {
-			title,
-			subtitle,
-			href,
-			backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
-			rating: isEpisode ? item.episode?.rating : item.movie?.rating,
-			userRating,
-			mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
-			ids: isEpisode ? (item.show?.ids ?? {}) : (item.movie?.ids ?? {}),
-			timestamp: formatTime(item.watched_at),
-		};
-	});
+      return {
+        historyId: item.id,
+        title,
+        subtitle: isEpisode
+          ? `${epLabel} ${item.episode.title || ""}`
+          : item.movie?.year
+            ? String(item.movie.year)
+            : "",
+        href: isEpisode
+          ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode?.season}/episodes/${item.episode?.number}`
+          : `/movies/${item.movie?.ids?.slug}`,
+        showHref: isEpisode ? `/shows/${item.show?.ids?.slug}` : undefined,
+        backdropUrl: finalImageUrl,
+        rating: isEpisode ? item.episode?.rating : item.movie?.rating,
+        userRating: isEpisode ? epRatingMap.get(item.episode.ids.trakt) : undefined,
+        mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
+        ids: isEpisode ? (item.show?.ids ?? {}) : (item.movie?.ids ?? {}),
+        episodeIds: isEpisode ? (item.episode?.ids ?? {}) : undefined,
+        watched_at: item.watched_at,
+        showInlineActions: true,
+        isWatched: true,
+        variant: "landscape" as const,
+      };
+    }),
+  );
 
-	if (items.length === 0) return null;
+  function formatTimeAgo(dateStr: string) {
+    if (!dateStr) return "";
+    const diff = new Date().getTime() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
 
-	return (
-		<CardGrid title="Recently Watched" defaultRows={2}>
-			{items.map((item, i) => (
-				<MediaCard key={`history-${i}`} {...item} />
-			))}
-		</CardGrid>
-	);
+  return (
+    <CardGrid
+      title="Recently Watched"
+      defaultRows={2}
+      rowSize={5}
+      gridClass="grid w-full grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+    >
+      {items.map((item) => (
+        <MediaCard
+          key={`recent-history-${item.historyId}`}
+          title={item.title}
+          subtitle={item.subtitle}
+          href={item.href}
+          showHref={item.showHref}
+          backdropUrl={item.backdropUrl}
+          rating={item.rating}
+          userRating={item.userRating}
+          mediaType={item.mediaType}
+          ids={item.ids}
+          episodeIds={item.episodeIds}
+          badge={formatTimeAgo(item.watched_at)}
+          isWatched={item.isWatched}
+          showInlineActions={item.showInlineActions}
+          variant={item.variant}
+        />
+      ))}
+    </CardGrid>
+  );
 }

@@ -5,58 +5,94 @@ import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { UpcomingSchedule } from "@/components/dashboard/upcoming-schedule";
 import { FriendsActivity } from "@/components/dashboard/friends-activity";
 import { ProfileBackdrop } from "@/components/dashboard/profile-backdrop";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CardGridSkeleton } from "@/components/dashboard/media-card-skeleton";
 
-function GridSkeleton({ rows = 3, poster = false }: { rows?: number; poster?: boolean }) {
-	return (
-		<div>
-			<div className="mb-3 flex items-center gap-3">
-				<div className="skeleton h-4 w-32 rounded" />
-				<div className="h-px flex-1 bg-zinc-800" />
-			</div>
-			<div
-				className={
-					poster
-						? "grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
-						: "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-				}
-			>
-				{Array.from({ length: (poster ? 7 : 6) * rows }).map((_, i) => (
-					<Skeleton key={i} className={`w-full ${poster ? "aspect-[2/3]" : "aspect-[16/10]"}`} />
-				))}
-			</div>
-		</div>
-	);
+function SectionHeaderSkeleton() {
+  return (
+    <div className="mb-4 flex items-center gap-3">
+      <div className="h-4 w-32 animate-pulse rounded bg-zinc-800" />
+      <div className="h-px flex-1 bg-zinc-800/50" />
+    </div>
+  );
 }
 
 export default function DashboardPage() {
-	return (
-		<>
-			<Suspense fallback={null}>
-				<ProfileBackdrop />
-			</Suspense>
+  return (
+    <div className="min-h-screen bg-black">
+      <Suspense fallback={null}>
+        <ProfileBackdrop />
+      </Suspense>
 
-			<div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pt-6">
-				<Suspense fallback={<GridSkeleton rows={3} />}>
-					<ContinueWatching />
-				</Suspense>
+      {/*
+        Important: "relative z-10" ensures the content is above the backdrop, 
+        but without a fixed height that blocks mouse interaction.
+      */}
+      <div className="relative z-10 mx-auto max-w-7xl space-y-12 px-4 pt-6 pb-20">
+        <section>
+          <Suspense
+            fallback={
+              <>
+                <SectionHeaderSkeleton />
+                <CardGridSkeleton variant="poster" count={7} />
+              </>
+            }
+          >
+            <ContinueWatching />
+          </Suspense>
+        </section>
 
-				<Suspense fallback={<GridSkeleton rows={1} poster />}>
-					<StartWatching />
-				</Suspense>
+        <section>
+          <Suspense
+            fallback={
+              <>
+                <SectionHeaderSkeleton />
+                <CardGridSkeleton variant="landscape" count={5} />
+              </>
+            }
+          >
+            <RecentActivity />
+          </Suspense>
+        </section>
 
-				<Suspense fallback={<GridSkeleton rows={2} />}>
-					<UpcomingSchedule />
-				</Suspense>
+        <section>
+          <Suspense
+            fallback={
+              <>
+                <SectionHeaderSkeleton />
+                <CardGridSkeleton variant="poster" count={7} />
+              </>
+            }
+          >
+            <StartWatching />
+          </Suspense>
+        </section>
 
-				<Suspense fallback={<GridSkeleton rows={2} />}>
-					<RecentActivity />
-				</Suspense>
+        <section>
+          <Suspense
+            fallback={
+              <>
+                <SectionHeaderSkeleton />
+                <CardGridSkeleton variant="landscape" count={5} />
+              </>
+            }
+          >
+            <UpcomingSchedule />
+          </Suspense>
+        </section>
 
-				<Suspense fallback={<GridSkeleton rows={2} />}>
-					<FriendsActivity />
-				</Suspense>
-			</div>
-		</>
-	);
+        <section>
+          <Suspense
+            fallback={
+              <>
+                <SectionHeaderSkeleton />
+                <CardGridSkeleton variant="landscape" count={5} />
+              </>
+            }
+          >
+            <FriendsActivity />
+          </Suspense>
+        </section>
+      </div>
+    </div>
+  );
 }
