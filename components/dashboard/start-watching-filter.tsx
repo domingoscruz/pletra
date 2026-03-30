@@ -19,6 +19,7 @@ export function StartWatchingFilter({
 
     const result: any[] = [];
     const insertedIndices = new Set<number>();
+
     for (const show of showItems) {
       for (let j = 0; j < movieItems.length; j++) {
         if (!insertedIndices.has(j) && movieItems[j].airDate > show.airDate) {
@@ -28,11 +29,43 @@ export function StartWatchingFilter({
       }
       result.push(show);
     }
+
     movieItems.forEach((m, j) => {
       if (!insertedIndices.has(j)) result.push(m);
     });
+
     return result;
   }, [filter, showItems, movieItems]);
+
+  // Define the empty state as an array to satisfy CardGrid's strict children type if necessary
+  const renderContent = () => {
+    if (filteredItems.length === 0) {
+      return [
+        <div
+          key="empty-state"
+          className="col-span-full flex flex-col items-center justify-center py-12 px-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 text-center"
+        >
+          <p className="text-sm text-zinc-500 font-medium">
+            No {filter === "shows" ? "shows" : filter === "movies" ? "movies" : "items"} found in
+            your watchlist.
+          </p>
+          <p className="text-xs text-zinc-600 mt-1">
+            Add something to your Trakt Watchlist to get started.
+          </p>
+        </div>,
+      ];
+    }
+
+    return filteredItems.map((item) => (
+      <MediaCard
+        key={`start-${item.mediaType}-${item.ids.trakt}`}
+        {...item}
+        showHref={item.showHref}
+        variant="poster"
+        showInlineActions={true}
+      />
+    ));
+  };
 
   return (
     <section className="group/section">
@@ -66,27 +99,7 @@ export function StartWatchingFilter({
         rowSize={7}
         gridClass="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
       >
-        {filteredItems.length === 0 ? (
-          <div className="col-span-full flex flex-col items-center justify-center py-12 px-4 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 text-center">
-            <p className="text-sm text-zinc-500 font-medium">
-              No {filter === "shows" ? "shows" : filter === "movies" ? "movies" : "items"} found in
-              your watchlist.
-            </p>
-            <p className="text-xs text-zinc-600 mt-1">
-              Add something to your Trakt Watchlist to get started.
-            </p>
-          </div>
-        ) : (
-          filteredItems.map((item) => (
-            <MediaCard
-              key={`start-${item.mediaType}-${item.ids.trakt}`}
-              {...item}
-              showHref={item.showHref}
-              variant="poster"
-              showInlineActions={true}
-            />
-          ))
-        )}
+        {renderContent()}
       </CardGrid>
     </section>
   );
