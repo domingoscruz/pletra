@@ -138,8 +138,8 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         if (id && r.rating) userRatingsMap.set(id, r.rating);
       }
     }
-  } catch (error) {
-    console.error("Failed to fetch user ratings:", error);
+  } catch {
+    // Not available
   }
 
   // Server-side search
