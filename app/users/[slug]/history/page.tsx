@@ -205,7 +205,6 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     backdropUrl: images[i]?.backdrop ?? null,
     mediaType: item.movie ? ("movies" as const) : ("episodes" as const),
     ids: item.movie?.ids ?? item.episode?.ids ?? item.show?.ids ?? {},
-    // Ensure no 'timestamp' is being passed here to avoid downstream type errors
   }));
 
   return (
