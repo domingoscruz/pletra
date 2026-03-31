@@ -56,7 +56,7 @@ export function CardActions({
   const [portalCoords, setPortalCoords] = useState<{
     top: number;
     left: number;
-    width: number;
+    isMobile: boolean;
   } | null>(null);
 
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -80,10 +80,12 @@ export function CardActions({
   useEffect(() => {
     if ((showWatchOptions || showRating) && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
+      const isMobile = window.innerWidth < 640;
+
       setPortalCoords({
-        top: rect.top + window.scrollY,
-        left: rect.left + window.scrollX,
-        width: rect.width,
+        top: rect.top,
+        left: rect.left + rect.width / 2,
+        isMobile,
       });
     }
   }, [showWatchOptions, showRating]);
@@ -217,21 +219,31 @@ export function CardActions({
     if (!showRating && !showWatchOptions) return null;
     if (!portalCoords || typeof window === "undefined") return null;
 
+    const { top, left, isMobile } = portalCoords;
+
     return createPortal(
       <div
         className="portal-menu-content"
         style={{
-          position: "absolute",
-          top: `${portalCoords.top}px`,
-          left: `${portalCoords.left}px`,
-          width: `${portalCoords.width}px`,
-          zIndex: 9999,
+          position: "fixed",
+          top: isMobile ? "auto" : `${top}px`,
+          bottom: isMobile ? "2rem" : "auto",
+          left: isMobile ? "50%" : `${left}px`,
+          transform: "translateX(-50%)",
+          width: isMobile ? "calc(100vw - 2rem)" : "auto",
+          maxWidth: isMobile ? "340px" : "none",
+          zIndex: 10000,
           pointerEvents: "none",
         }}
       >
-        <div style={{ pointerEvents: "auto", position: "relative" }}>
+        <div className="relative flex justify-center w-full" style={{ pointerEvents: "auto" }}>
           {showWatchOptions && (
-            <div className="absolute bottom-2 left-0 w-[240px] animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20">
+            <div
+              className={cn(
+                "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20",
+                !isMobile && "absolute bottom-4 w-[240px]",
+              )}
+            >
               <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
                 {watched && !showAddAnotherPlay ? "Manage History" : "Mark Progress"}
               </p>
@@ -318,7 +330,12 @@ export function CardActions({
           )}
 
           {showRating && (
-            <div className="absolute bottom-2 right-0 w-[280px] animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-5 shadow-2xl ring-1 ring-white/20 sm:w-[300px]">
+            <div
+              className={cn(
+                "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-5 shadow-2xl ring-1 ring-white/20",
+                !isMobile && "absolute bottom-4 w-[300px]",
+              )}
+            >
               <div className="mb-4 text-center">
                 <p className="text-sm font-black italic text-white uppercase tracking-tighter">
                   {hoverRating
@@ -433,9 +450,8 @@ export function CardActions({
         >
           <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
         </svg>
-        {globalRating != null && (
-          <span className="text-[11px] font-bold text-white tabular-nums">{globalRating}%</span>
-        )}
+        {/* If globalRating is null, it now displays 0% */}
+        <span className="text-[11px] font-bold text-white tabular-nums">{globalRating ?? 0}%</span>
       </button>
     </div>
   );

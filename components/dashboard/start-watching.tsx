@@ -20,7 +20,7 @@ const getEpisodeTitle = cache(async (client: any, showId: number) => {
 export async function StartWatching() {
   const client = await getAuthenticatedTraktClient();
 
-  // If client is not authenticated or fails, return empty filter to avoid crash
+  // If client is not authenticated, return empty to avoid breaking the dashboard
   if (!client) {
     return <StartWatchingFilter showItems={[]} movieItems={[]} />;
   }
@@ -33,38 +33,46 @@ export async function StartWatching() {
             params: { id: "me", sort: "released" },
             query: {
               page: 1,
-              limit: 18,
+              limit: 20, // Increased slightly to fill grids better on ultra-wide
               sort_how: "desc",
-              // Changed from array to a single valid string to match SDK types
               hide: "unreleased",
               extended: "full",
             },
           })
           .catch(() => ({ status: 401, body: [] })),
+
         client.users.watchlist
           .movies({
             params: { id: "me", sort: "released" },
             query: {
               page: 1,
-              limit: 18,
+              limit: 20,
               sort_how: "desc",
               hide: "unreleased",
               extended: "full",
             },
           })
           .catch(() => ({ status: 401, body: [] })),
+
         client.sync.progress
-          .movies({ query: { page: 1, limit: 50 } })
+          .movies({
+            query: { page: 1, limit: 50 },
+          })
           .catch(() => ({ status: 401, body: [] })),
+
         client.users.ratings
-          .shows({ params: { id: "me" } })
+          .shows({
+            params: { id: "me" },
+          })
           .catch(() => ({ status: 401, body: [] })),
+
         client.users.ratings
-          .movies({ params: { id: "me" } })
+          .movies({
+            params: { id: "me" },
+          })
           .catch(() => ({ status: 401, body: [] })),
       ]);
 
-    // Safety check for each response status
     const showWatchlist = showWatchlistRes?.status === 200 ? showWatchlistRes.body : [];
     const movieWatchlist = movieWatchlistRes?.status === 200 ? movieWatchlistRes.body : [];
     const movieProgress = movieProgressRes?.status === 200 ? movieProgressRes.body : [];
@@ -77,6 +85,7 @@ export async function StartWatching() {
         if (r.show?.ids?.trakt && r.rating) showRatingMap.set(r.show.ids.trakt, r.rating);
       });
     }
+
     if (movieRatingsRes?.status === 200 && Array.isArray(movieRatingsRes.body)) {
       movieRatingsRes.body.forEach((r: any) => {
         if (r.movie?.ids?.trakt && r.rating) movieRatingMap.set(r.movie.ids.trakt, r.rating);
@@ -86,16 +95,16 @@ export async function StartWatching() {
     const inProgressMovieIds = new Set(
       (movieProgress as any[]).map((m) => m.movie?.ids?.trakt).filter(Boolean),
     );
+
     const filteredMovies = (movieWatchlist as any[]).filter(
       (item) => item.movie?.ids?.trakt && !inProgressMovieIds.has(item.movie.ids.trakt),
     );
 
-    // Fetch titles for episode 1x01
-    const firstEpisodesTitles = await Promise.all(
-      (showWatchlist as any[]).map((item) => getEpisodeTitle(client, item.show.ids.trakt)),
-    );
-
-    const [showImages, movieImages] = await Promise.all([
+    // Optimized batch fetching for images and titles
+    const [firstEpisodesTitles, showImages, movieImages] = await Promise.all([
+      Promise.all(
+        (showWatchlist as any[]).map((item) => getEpisodeTitle(client, item.show.ids.trakt)),
+      ),
       Promise.all(
         (showWatchlist as any[]).map((item) => fetchTmdbImages(item.show?.ids?.tmdb, "tv")),
       ),
@@ -103,7 +112,7 @@ export async function StartWatching() {
     ]);
 
     const showItems = (showWatchlist as any[]).map((item, i) => {
-      const epTitle = firstEpisodesTitles[i] ? ` ${firstEpisodesTitles[i]}` : "";
+      const epTitle = firstEpisodesTitles[i] ? `: ${firstEpisodesTitles[i]}` : "";
       return {
         title: item.show?.title ?? "Unknown",
         subtitle: `1x01${epTitle}`,
@@ -134,7 +143,11 @@ export async function StartWatching() {
       airDate: item.movie?.released ? new Date(item.movie.released).getTime() : 0,
     }));
 
-    return <StartWatchingFilter showItems={showItems} movieItems={movieItems} />;
+    return (
+      <div className="w-full overflow-x-hidden px-1 sm:px-0">
+        <StartWatchingFilter showItems={showItems} movieItems={movieItems} />
+      </div>
+    );
   } catch (error) {
     console.error("Critical error in StartWatching component:", error);
     return <StartWatchingFilter showItems={[]} movieItems={[]} />;

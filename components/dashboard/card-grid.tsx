@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 
 interface CardGridProps {
   title: string | ReactNode;
   children: ReactNode[];
-  rowSize?: number;
+  rowSize?: number; // Base for desktop
   defaultRows?: number;
   gridClass?: string;
 }
@@ -17,10 +17,41 @@ export function CardGrid({
   defaultRows = 3,
   gridClass,
 }: CardGridProps) {
+  // Dynamic column detection
+  const [columns, setColumns] = useState(rowSize);
   const [page, setPage] = useState(0);
   const [animDir, setAnimDir] = useState<"left" | "right" | null>(null);
-  const itemsPerPage = rowSize * defaultRows;
+
+  const updateColumns = useCallback(() => {
+    const width = window.innerWidth;
+    if (width < 640)
+      setColumns(2); // sm
+    else if (width < 768)
+      setColumns(3); // md
+    else if (width < 1024)
+      setColumns(4); // lg
+    else if (width < 1280)
+      setColumns(5); // xl
+    else setColumns(rowSize); // default/2xl
+  }, [rowSize]);
+
+  useEffect(() => {
+    updateColumns();
+    window.addEventListener("resize", updateColumns);
+    return () => window.removeEventListener("resize", updateColumns);
+  }, [updateColumns]);
+
+  // Recalculate items per page based on current responsive columns
+  const itemsPerPage = columns * defaultRows;
   const totalPages = Math.ceil(children.length / itemsPerPage);
+
+  // Reset page if current page becomes invalid after resize
+  useEffect(() => {
+    if (page >= totalPages && totalPages > 0) {
+      setPage(totalPages - 1);
+    }
+  }, [totalPages, page]);
+
   const start = page * itemsPerPage;
   const visible = children.slice(start, start + itemsPerPage);
   const hasNext = page < totalPages - 1;
@@ -87,18 +118,17 @@ export function CardGrid({
 
   return (
     <div onWheel={handleWheel} className="w-full overflow-hidden">
-      {/* HEADER SECTION - strictly ordered: Title -> Line -> Pagination */}
+      {/* HEADER SECTION */}
       <div className="mb-3 flex w-full items-center gap-4">
-        <h2 className="shrink-0 text-[14px] font-black uppercase tracking-wider text-zinc-200">
+        <h2 className="shrink-0 text-[12px] sm:text-[14px] font-black uppercase tracking-wider text-zinc-200">
           {title}
         </h2>
 
-        {/* THE SPRING LINE - This MUST be in the middle */}
         <div className="h-px flex-1 bg-zinc-700/50" />
 
         {totalPages > 1 && (
-          <div className="flex shrink-0 items-center gap-4 tabular-nums">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4 tabular-nums">
+            <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-widest text-zinc-500">
               <span className="text-zinc-200">{page + 1}</span> / {totalPages}
             </span>
 
@@ -106,7 +136,8 @@ export function CardGrid({
               <button
                 onClick={() => changePage("left")}
                 disabled={!hasPrev}
-                className="p-1 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
+                className="p-1.5 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
+                aria-label="Previous page"
               >
                 <svg
                   width="14"
@@ -124,7 +155,8 @@ export function CardGrid({
               <button
                 onClick={() => changePage("right")}
                 disabled={!hasNext}
-                className="p-1 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
+                className="p-1.5 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
+                aria-label="Next page"
               >
                 <svg
                   width="14"

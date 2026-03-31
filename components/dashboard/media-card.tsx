@@ -21,11 +21,11 @@ const RIBBON_COLORS: Record<number, string> = {
 };
 
 const SPECIAL_TAG_COLORS: Record<string, string> = {
-  "Series Premiere": "bg-[#60a5fa]",
+  "Series Premiere": "bg-[#2d7a30]",
   "Season Premiere": "bg-[#45b449]",
-  "Season Finale": "bg-[#ef4444]",
-  "Series Finale": "bg-[#9b1d9c]",
-  "New Episode": "bg-[#9333ea]",
+  "Season Finale": "bg-[#9810fa]",
+  "Series Finale": "bg-[#ef4444]",
+  "New Episode": "bg-[#9810fa]",
 };
 
 export interface MediaCardProps {
@@ -42,6 +42,7 @@ export interface MediaCardProps {
   episodeIds?: Record<string, unknown>;
   releasedAt?: string;
   progress?: { aired: number; completed: number };
+  totalAired?: number;
   variant?: "landscape" | "poster";
   disableHover?: boolean;
   showInlineActions?: boolean;
@@ -70,6 +71,7 @@ export function MediaCard({
   episodeIds,
   releasedAt,
   progress,
+  totalAired,
   variant = "landscape",
   disableHover = false,
   showInlineActions = false,
@@ -111,12 +113,13 @@ export function MediaCard({
     window.dispatchEvent(new Event("trakt-checkin-updated"));
   };
 
-  const aired = progress?.aired ?? 0;
-  const completed = progress?.completed ?? 0;
-  const displayAired = aired > 0 ? aired : completed > 0 ? completed : 0;
+  const airedCount = totalAired ?? progress?.aired ?? 0;
+  const completedCount = progress?.completed ?? 0;
+
   const percentage =
-    displayAired > 0 ? Math.min(100, Math.round((completed / displayAired) * 100)) : 0;
-  const remaining = Math.max(0, aired - completed);
+    airedCount > 0 ? Math.min(100, Math.round((completedCount / airedCount) * 100)) : 0;
+
+  const remaining = Math.max(0, airedCount - completedCount);
 
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
@@ -144,7 +147,6 @@ export function MediaCard({
               </div>
             )}
 
-            {/* Top Banner Tags (Premiere/Finale) */}
             {isTopTag && (
               <div
                 className={cn(
@@ -156,7 +158,6 @@ export function MediaCard({
               </div>
             )}
 
-            {/* Bottom Right Badge (New Episode) */}
             {specialTag === "New Episode" && (
               <div
                 className={cn(
@@ -179,7 +180,6 @@ export function MediaCard({
               </div>
             )}
 
-            {/* Badge (S01E01) - Moves down if there is a Top Tag to avoid overlap */}
             {badge && (
               <div
                 className={cn(
@@ -193,7 +193,7 @@ export function MediaCard({
           </div>
         </Link>
 
-        {displayAired > 0 && (
+        {airedCount > 0 && (
           <div
             ref={barRef}
             onMouseEnter={handleMouseEnter}
@@ -253,7 +253,8 @@ export function MediaCard({
             </p>
           )}
 
-          <div className="mt-2 w-full">
+          {/* Action container: relative positioning helps the child popover stay within bounds */}
+          <div className="mt-2 w-full relative">
             <CardActions
               mediaType={mediaType}
               ids={ids}

@@ -6,10 +6,22 @@ import { MediaCard } from "./media-card";
 export async function RecentActivity() {
   const client = await getAuthenticatedTraktClient();
 
+  if (!client) return null;
+
   const [showRes, movieRes, epRatingsRes] = await Promise.all([
-    client.users.history.shows({ params: { id: "me" }, query: { limit: 20, extended: "full" } }),
-    client.users.history.movies({ params: { id: "me" }, query: { limit: 10, extended: "full" } }),
-    client.users.ratings.episodes({ params: { id: "me" } }).catch(() => null),
+    client.users.history.shows({
+      params: { id: "me" },
+      query: { limit: 20, extended: "full" },
+    }),
+    client.users.history.movies({
+      params: { id: "me" },
+      query: { limit: 10, extended: "full" },
+    }),
+    client.users.ratings
+      .episodes({
+        params: { id: "me" },
+      })
+      .catch(() => null),
   ]);
 
   const showHistory = showRes.status === 200 ? showRes.body : [];
@@ -18,7 +30,9 @@ export async function RecentActivity() {
 
   if (epRatingsRes?.status === 200) {
     for (const r of epRatingsRes.body as any[]) {
-      if (r.episode?.ids?.trakt && r.rating) epRatingMap.set(r.episode.ids.trakt, r.rating);
+      if (r.episode?.ids?.trakt && r.rating) {
+        epRatingMap.set(r.episode.ids.trakt, r.rating);
+      }
     }
   }
 
@@ -39,7 +53,6 @@ export async function RecentActivity() {
       let finalImageUrl: string | null = null;
 
       if (isEpisode && tmdbId) {
-        // Fetch both episode-specific and show-level images for better fallbacks
         const [epImgs, showImgs] = await Promise.all([
           fetchTmdbImages(tmdbId, "tv", item.episode?.season, item.episode?.number),
           fetchTmdbImages(tmdbId, "tv"),
@@ -49,7 +62,6 @@ export async function RecentActivity() {
         finalImageUrl =
           epImgs?.still || showImgs?.backdrop || epImgs?.poster || showImgs?.poster || null;
       } else if (tmdbId) {
-        // Standard movie image fetch
         const movieImgs = await fetchTmdbImages(tmdbId, "movie");
         finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
       }
@@ -97,31 +109,35 @@ export async function RecentActivity() {
   }
 
   return (
-    <CardGrid
-      title="Recently Watched"
-      defaultRows={2}
-      rowSize={5}
-      gridClass="grid w-full grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
-    >
-      {items.map((item) => (
-        <MediaCard
-          key={`recent-history-${item.historyId}`}
-          title={item.title}
-          subtitle={item.subtitle}
-          href={item.href}
-          showHref={item.showHref}
-          backdropUrl={item.backdropUrl}
-          rating={item.rating}
-          userRating={item.userRating}
-          mediaType={item.mediaType}
-          ids={item.ids}
-          episodeIds={item.episodeIds}
-          badge={formatTimeAgo(item.watched_at)}
-          isWatched={item.isWatched}
-          showInlineActions={item.showInlineActions}
-          variant={item.variant}
-        />
-      ))}
-    </CardGrid>
+    <div className="w-full">
+      <CardGrid
+        title="Recently Watched"
+        defaultRows={2}
+        rowSize={5}
+        // Responsive grid for landscape cards:
+        // 1 column on very small mobile, 2 on small, 3 on tablets, 4 on laptops, 5 on desktop
+        gridClass="grid w-full grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-4 gap-y-6 sm:gap-y-8"
+      >
+        {items.map((item) => (
+          <MediaCard
+            key={`recent-history-${item.historyId}`}
+            title={item.title}
+            subtitle={item.subtitle}
+            href={item.href}
+            showHref={item.showHref}
+            backdropUrl={item.backdropUrl}
+            rating={item.rating}
+            userRating={item.userRating}
+            mediaType={item.mediaType}
+            ids={item.ids}
+            episodeIds={item.episodeIds}
+            badge={formatTimeAgo(item.watched_at)}
+            isWatched={item.isWatched}
+            showInlineActions={item.showInlineActions}
+            variant={item.variant}
+          />
+        ))}
+      </CardGrid>
+    </div>
   );
 }

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
@@ -43,6 +44,32 @@ export async function ContinueWatching() {
   type ShowItem = (typeof shows)[number];
   type MovieItem = (typeof movies)[number];
 
+  const showSeasonsRes = await Promise.all(
+    (shows as ShowItem[]).map((item) => {
+      const slug = item.show?.ids?.slug;
+      return slug
+        ? client.shows
+            .seasons({ params: { id: slug }, query: { extended: "full" } })
+            .catch(() => null)
+        : Promise.resolve(null);
+    }),
+  );
+
+  const exactAiredMap = new Map<string, number>();
+
+  showSeasonsRes.forEach((res, i) => {
+    if (res?.status === 200 && Array.isArray(res.body)) {
+      const slug = (shows as ShowItem[])[i].show?.ids?.slug;
+      if (slug) {
+        const totalAiredWithoutSpecials = res.body
+          .filter((s: any) => s.number > 0)
+          .reduce((acc: number, s: any) => acc + (s.aired_episodes || s.episode_count || 0), 0);
+
+        exactAiredMap.set(slug, totalAiredWithoutSpecials);
+      }
+    }
+  });
+
   const [showImages, seasonImages, movieImages] = await Promise.all([
     Promise.all(
       (shows as ShowItem[]).map((item) => {
@@ -78,28 +105,50 @@ export async function ContinueWatching() {
     const nextEp = item.progress?.next_episode;
     if (!nextEp) return;
 
+    const slug = show?.ids?.slug;
+    const exactAired = slug ? exactAiredMap.get(slug) : undefined;
+    const officialAiredCount =
+      exactAired || (show as any)?.aired_episodes || item.progress?.aired || 1;
+
     let specialTag: MediaCardProps["specialTag"] = undefined;
+    const epType = (nextEp as any).episode_type;
 
-    if (nextEp.first_aired) {
-      const releaseDate = new Date(nextEp.first_aired).getTime();
-      const now = new Date().getTime();
-      const isNew = now - releaseDate > 0 && now - releaseDate <= 48 * 60 * 60 * 1000;
-
-      if (isNew) {
-        specialTag = "New Episode";
-      }
+    if (epType === "series_finale") {
+      specialTag = "Series Finale";
+    } else if (epType === "season_finale" || epType === "mid_season_finale") {
+      specialTag = "Season Finale";
+    } else if (epType === "series_premiere") {
+      specialTag = "Series Premiere";
+    } else if (epType === "season_premiere" || epType === "mid_season_premiere") {
+      specialTag = "Season Premiere";
     }
 
     if (!specialTag) {
       if (nextEp.number === 1) {
         specialTag = nextEp.season === 1 ? "Series Premiere" : "Season Premiere";
       } else if (
-        item.progress?.aired &&
         item.progress?.completed !== undefined &&
-        item.progress.completed + 1 === item.progress.aired
+        item.progress.completed + 1 === officialAiredCount
       ) {
         const isFinalStatus = show?.status === "ended" || show?.status === "canceled";
         specialTag = isFinalStatus ? "Series Finale" : "Season Finale";
+      } else {
+        const currentSeasonProgress = (item as any).progress?.seasons?.find(
+          (s: any) => s.number === nextEp.season,
+        );
+        if (currentSeasonProgress && nextEp.number === currentSeasonProgress.aired) {
+          specialTag = "Season Finale";
+        }
+      }
+    }
+
+    if (!specialTag && nextEp.first_aired) {
+      const releaseDate = new Date(nextEp.first_aired).getTime();
+      const now = new Date().getTime();
+      const isNew = now - releaseDate > 0 && now - releaseDate <= 48 * 60 * 60 * 1000;
+
+      if (isNew) {
+        specialTag = "New Episode";
       }
     }
 
@@ -110,7 +159,11 @@ export async function ContinueWatching() {
     items.push({
       keyId: `show-${show?.ids?.trakt}-${nextEp.ids?.trakt}`,
       title: show?.title ?? "Unknown",
-      subtitle: (<span title={fullSubtitle}>{fullSubtitle}</span>) as any,
+      subtitle: (
+        <span className="block truncate" title={fullSubtitle}>
+          {fullSubtitle}
+        </span>
+      ) as any,
       href: `/shows/${show?.ids?.slug}/seasons/${nextEp.season}/episodes/${nextEp.number}`,
       showHref: `/shows/${show?.ids?.slug}`,
       backdropUrl: showImages[i]?.backdrop ?? null,
@@ -123,9 +176,10 @@ export async function ContinueWatching() {
       releasedAt: nextEp.first_aired ?? undefined,
       isWatched: false,
       specialTag,
-      badge: undefined, // Cleaning up the black box issue
+      badge: undefined,
+      totalAired: officialAiredCount,
       progress: {
-        aired: item.progress?.aired || (show as any)?.aired_episodes || 1,
+        aired: officialAiredCount,
         completed: item.progress?.completed ?? 0,
       },
       lastWatchedAt: item.progress?.last_watched_at
@@ -155,7 +209,11 @@ export async function ContinueWatching() {
     items.push({
       keyId: `movie-${movie?.ids?.trakt}`,
       title: movie?.title ?? "Unknown",
-      subtitle: (<span title={movieSubtitle}>{movieSubtitle}</span>) as any,
+      subtitle: (
+        <span className="block truncate" title={movieSubtitle}>
+          {movieSubtitle}
+        </span>
+      ) as any,
       href: `/movies/${movie?.ids?.slug}`,
       backdropUrl: movieImages[i]?.backdrop ?? null,
       posterUrl: movieImages[i]?.poster ?? null,
@@ -172,11 +230,17 @@ export async function ContinueWatching() {
 
   items.sort((a, b) => b.lastWatchedAt - a.lastWatchedAt);
 
+  if (items.length === 0) return null;
+
   return (
-    <CardGrid title="Continue Watching" defaultRows={1}>
-      {items.map((item) => (
-        <MediaCard key={item.keyId} {...item} variant="poster" showInlineActions={true} />
-      ))}
-    </CardGrid>
+    <div className="w-full overflow-hidden">
+      <CardGrid title="Continue Watching" defaultRows={1}>
+        {items.map((item) => (
+          <div key={item.keyId} className="w-full">
+            <MediaCard {...item} variant="poster" showInlineActions={true} />
+          </div>
+        ))}
+      </CardGrid>
+    </div>
   );
 }

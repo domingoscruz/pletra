@@ -6,9 +6,6 @@ import { ProxiedImage as Avatar } from "@/components/ui/proxied-image";
 import { CardGrid } from "./card-grid";
 import { MediaCard } from "./media-card";
 
-// Note: Removed "use client" and unused React hooks.
-// This is now a pure Server Component.
-
 export async function FriendsActivity() {
   const client = await getAuthenticatedTraktClient();
 
@@ -126,7 +123,6 @@ export async function FriendsActivity() {
         ? `/shows/${activity.show?.ids?.slug}/seasons/${activity.episode?.season}/episodes/${activity.episode?.number}`
         : `/movies/${activity.movie?.ids?.slug}`;
 
-      // Detection logic for the Season Finale banner
       let specialTag: any = undefined;
       if (activity.action === "season_finale") specialTag = "Season Finale";
       else if (activity.action === "series_finale") specialTag = "Series Finale";
@@ -166,86 +162,92 @@ export async function FriendsActivity() {
   }
 
   return (
-    <CardGrid
-      title="Friend Activity"
-      defaultRows={2}
-      rowSize={5}
-      gridClass="grid w-full grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
-    >
-      {items.map((item, i) => (
-        <div key={`friend-activity-${i}`} className="relative flex flex-col w-full">
-          <MediaCard
-            title={item.title}
-            subtitle={item.subtitle}
-            href={item.href}
-            showHref={item.showHref}
-            backdropUrl={item.backdropUrl}
-            mediaType={item.mediaType}
-            ids={item.ids}
-            episodeIds={item.episodeIds}
-            badge={formatTimeAgo(item.watched_at)}
-            specialTag={item.specialTag}
-            showInlineActions={false}
-            variant={item.variant}
-          />
+    <div className="w-full px-1 sm:px-0">
+      <CardGrid
+        title="Friend Activity"
+        defaultRows={2}
+        rowSize={5}
+        // Responsive landscape grid scaling
+        gridClass="grid w-full grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-4 gap-y-10"
+      >
+        {items.map((item, i) => (
+          <div key={`friend-activity-${i}`} className="relative flex flex-col w-full">
+            <MediaCard
+              title={item.title}
+              subtitle={item.subtitle}
+              href={item.href}
+              showHref={item.showHref}
+              backdropUrl={item.backdropUrl}
+              mediaType={item.mediaType}
+              ids={item.ids}
+              episodeIds={item.episodeIds}
+              badge={formatTimeAgo(item.watched_at)}
+              specialTag={item.specialTag}
+              showInlineActions={false}
+              variant={item.variant}
+            />
 
-          <div className="mt-2 flex w-full flex-col items-center px-1 text-center">
-            <p className="mb-1 truncate text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            {/* Friend metadata section below the card */}
+            <div className="mt-3 flex w-full flex-col items-center px-1 text-center">
+              <p className="mb-1 block w-full truncate text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                <Link
+                  href={`/users/${item.friend.userSlug}`}
+                  className="text-zinc-400 transition-colors hover:text-purple-400"
+                >
+                  {item.friend.username}
+                </Link>
+                <span className="ml-1">has watched</span>
+              </p>
+
+              <Link
+                href={item.href}
+                className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-purple-400 hover:underline"
+              >
+                {item.mediaType === "shows" ? item.subtitle : item.title}
+              </Link>
+
+              {item.mediaType === "shows" && item.showHref ? (
+                <Link
+                  href={item.showHref}
+                  className="mt-1 block w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
+                >
+                  {item.title}
+                </Link>
+              ) : (
+                <p className="mt-1 block w-full truncate text-[11px] font-medium leading-tight text-zinc-400">
+                  {item.mediaType === "shows" ? item.title : item.subtitle}
+                </p>
+              )}
+            </div>
+
+            {/* Floating Avatar - Adjusted for touch targets */}
+            <div className="group/avatar absolute top-2 right-2 z-20">
               <Link
                 href={`/users/${item.friend.userSlug}`}
-                className="text-zinc-400 transition-colors hover:text-purple-400"
+                className="relative block h-7 w-7 overflow-hidden rounded-full bg-zinc-800 ring-2 ring-black/50 hover:ring-white/50 transition-all active:scale-95"
               >
+                {item.friend.avatarUrl ? (
+                  <Avatar
+                    src={item.friend.avatarUrl}
+                    alt={item.friend.username}
+                    width={28}
+                    height={28}
+                    className="h-full w-full rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center text-[9px] font-bold text-zinc-500">
+                    {item.friend.username[0]?.toUpperCase()}
+                  </span>
+                )}
+              </Link>
+              {/* Tooltip hidden on mobile to avoid layout shifts */}
+              <div className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 whitespace-nowrap rounded bg-zinc-900/95 px-2 py-1 text-[10px] font-bold text-zinc-200 opacity-0 shadow-lg ring-1 ring-white/10 backdrop-blur-sm transition-opacity group-hover/avatar:opacity-100 hidden sm:block">
                 {item.friend.username}
-              </Link>
-              <span className="ml-1">has watched</span>
-            </p>
-
-            <Link
-              href={item.href}
-              className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-purple-400 hover:underline"
-            >
-              {item.mediaType === "shows" ? item.subtitle : item.title}
-            </Link>
-
-            {item.mediaType === "shows" && item.showHref ? (
-              <Link
-                href={item.showHref}
-                className="mt-1 block w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
-              >
-                {item.title}
-              </Link>
-            ) : (
-              <p className="mt-1 w-full truncate text-[11px] font-medium leading-tight text-zinc-400">
-                {item.mediaType === "shows" ? item.title : item.subtitle}
-              </p>
-            )}
-          </div>
-
-          <div className="group/avatar absolute top-2 right-2 z-20">
-            <Link
-              href={`/users/${item.friend.userSlug}`}
-              className="relative block h-7 w-7 overflow-hidden rounded-full bg-zinc-800 ring-2 ring-black/50 hover:ring-white/50 transition-all"
-            >
-              {item.friend.avatarUrl ? (
-                <Avatar
-                  src={item.friend.avatarUrl}
-                  alt={item.friend.username}
-                  width={28}
-                  height={28}
-                  className="h-full w-full rounded-full object-cover"
-                />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center text-[9px] font-bold text-zinc-500">
-                  {item.friend.username[0]?.toUpperCase()}
-                </span>
-              )}
-            </Link>
-            <div className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 whitespace-nowrap rounded bg-zinc-900/95 px-2 py-1 text-[10px] font-bold text-zinc-200 opacity-0 shadow-lg ring-1 ring-white/10 backdrop-blur-sm transition-opacity group-hover/avatar:opacity-100">
-              {item.friend.username}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
-    </CardGrid>
+        ))}
+      </CardGrid>
+    </div>
   );
 }
