@@ -6,7 +6,8 @@ import { MediaCard } from "./media-card";
 
 export async function UpcomingSchedule() {
   const client = await getAuthenticatedTraktClient();
-  const todayStr = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
 
   try {
     const [showsRes, moviesRes] = await Promise.all([
@@ -30,8 +31,16 @@ export async function UpcomingSchedule() {
       const ep = entry.episode;
       if (!show || !ep) continue;
 
+      const airTimeDate = new Date(entry.first_aired);
+      if (airTimeDate.getTime() < now.getTime()) continue;
+
       const imgs = await fetchTmdbImages(show.ids?.tmdb, "tv");
       const epLabel = `${ep.season}x${String(ep.number).padStart(2, "0")}`;
+
+      let specialTag: any = null;
+      if (ep.number === 1) {
+        specialTag = ep.season === 1 ? "Series Premiere" : "Season Premiere";
+      }
 
       items.push({
         title: show.title ?? "Unknown",
@@ -39,19 +48,21 @@ export async function UpcomingSchedule() {
         href: `/shows/${show.ids?.slug}/seasons/${ep.season}/episodes/${ep.number}`,
         showHref: `/shows/${show.ids?.slug}`,
         backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
-        // Corrected: Using show rating instead of episode rating for upcoming items
         rating: show.rating,
         mediaType: "episodes" as const,
         ids: show.ids ?? {},
         episodeIds: ep.ids ?? {},
-        airTime: new Date(entry.first_aired).getTime(),
+        airTime: airTimeDate.getTime(),
         first_aired: entry.first_aired,
+        specialTag,
       });
     }
 
     for (const entry of calMovies) {
       const movie = entry.movie;
       if (!movie) continue;
+      const releaseDate = new Date(entry.released);
+      if (releaseDate.getTime() < now.getTime()) continue;
 
       const imgs = await fetchTmdbImages(movie.ids?.tmdb, "movie");
       items.push({
@@ -64,18 +75,30 @@ export async function UpcomingSchedule() {
         rating: movie.rating,
         mediaType: "movies" as const,
         ids: movie.ids ?? {},
-        airTime: new Date(entry.released).getTime(),
+        airTime: releaseDate.getTime(),
         first_aired: entry.released,
       });
     }
 
     items.sort((a, b) => a.airTime - b.airTime);
-
     if (items.length === 0) return null;
 
-    const formatDateBadge = (dateStr: string) => {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const formatScheduleBadge = (dateStr: string) => {
+      const airDate = new Date(dateStr);
+      const diffMs = airDate.getTime() - now.getTime();
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const timeStr = airDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+
+      if (diffHours >= 0 && diffHours < 24) {
+        return diffHours === 0 ? "starting soon" : `in ${diffHours}h`;
+      } else if (airDate.toDateString() === tomorrow.toDateString()) {
+        return `tomorrow, ${timeStr}`;
+      } else {
+        const datePart = airDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        return `${datePart}, ${timeStr}`;
+      }
     };
 
     return (
@@ -88,16 +111,8 @@ export async function UpcomingSchedule() {
         {items.map((item, i) => (
           <MediaCard
             key={`upcoming-${i}`}
-            title={item.title}
-            subtitle={item.subtitle}
-            href={item.href}
-            showHref={item.showHref}
-            backdropUrl={item.backdropUrl}
-            rating={item.rating}
-            mediaType={item.mediaType}
-            ids={item.ids}
-            episodeIds={item.episodeIds}
-            badge={formatDateBadge(item.first_aired)}
+            {...item}
+            bottomBadge={formatScheduleBadge(item.first_aired)}
             isWatched={false}
             showInlineActions={true}
             variant="landscape"

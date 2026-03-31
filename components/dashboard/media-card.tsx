@@ -21,7 +21,7 @@ const RIBBON_COLORS: Record<number, string> = {
 };
 
 const SPECIAL_TAG_COLORS: Record<string, string> = {
-  "Series Premiere": "bg-[#2d7a30]",
+  "Series Premiere": "bg-[#27B7F5]",
   "Season Premiere": "bg-[#45b449]",
   "Season Finale": "bg-[#9810fa]",
   "Series Finale": "bg-[#ef4444]",
@@ -53,6 +53,7 @@ export interface MediaCardProps {
     | "Series Finale"
     | "New Episode";
   badge?: string;
+  bottomBadge?: string;
   isWatched?: boolean;
   priority?: boolean;
 }
@@ -77,6 +78,7 @@ export function MediaCard({
   showInlineActions = false,
   specialTag,
   badge,
+  bottomBadge,
   isWatched = false,
   priority = false,
 }: MediaCardProps) {
@@ -125,17 +127,16 @@ export function MediaCard({
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
   const isTopTag = specialTag && specialTag !== "New Episode";
 
-  // Safeguard for the color mapping on production
   const ribbonColor = optimisticRating
     ? RIBBON_COLORS[Math.floor(optimisticRating)]
     : "transparent";
 
   return (
-    <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
+    <div className="group relative flex w-full flex-col antialiased animate-in fade-in duration-300">
       <div className="relative">
         <Link
           href={href}
-          className="relative overflow-hidden rounded-t-lg bg-zinc-900 block border border-white/5 transition-all hover:border-white/20 active:scale-[0.98]"
+          className="block overflow-hidden rounded-t-lg border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]"
         >
           <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
             {imageUrl ? (
@@ -154,7 +155,7 @@ export function MediaCard({
             {isTopTag && (
               <div
                 className={cn(
-                  "absolute inset-x-0 top-0 z-40 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-widest text-white shadow-md leading-none ring-1 ring-black/10",
+                  "absolute inset-x-0 top-0 z-40 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-[0.15em] text-white shadow-md leading-none ring-1 ring-black/10",
                   SPECIAL_TAG_COLORS[specialTag],
                 )}
               >
@@ -162,15 +163,14 @@ export function MediaCard({
               </div>
             )}
 
-            {/* FIXED RIBBON SECTION */}
-            {mounted && showInlineActions && optimisticRating && optimisticRating > 0 ? (
+            {mounted && showInlineActions && optimisticRating && optimisticRating > 0 && (
               <div
-                className="absolute top-0 right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
+                className="absolute right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
                 style={{
+                  top: isTopTag ? "22px" : "0",
                   borderTop: "38px solid",
                   borderLeft: "38px solid transparent",
                   borderTopColor: ribbonColor,
-                  display: "block",
                 }}
               >
                 <span
@@ -180,7 +180,24 @@ export function MediaCard({
                   {optimisticRating}
                 </span>
               </div>
-            ) : null}
+            )}
+
+            {badge && (
+              <div
+                className={cn(
+                  "absolute left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10 pointer-events-none transition-all",
+                  isTopTag ? "top-[28px]" : "top-2",
+                )}
+              >
+                {badge}
+              </div>
+            )}
+
+            {bottomBadge && (
+              <div className="absolute bottom-2 left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10 pointer-events-none transition-all">
+                {bottomBadge}
+              </div>
+            )}
 
             {specialTag === "New Episode" && (
               <div
@@ -190,17 +207,6 @@ export function MediaCard({
                 )}
               >
                 {specialTag}
-              </div>
-            )}
-
-            {badge && (
-              <div
-                className={cn(
-                  "absolute z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none transition-all",
-                  isTopTag ? "top-[28px] left-2" : "top-2 left-2",
-                )}
-              >
-                {badge}
               </div>
             )}
           </div>
@@ -223,7 +229,7 @@ export function MediaCard({
       </div>
 
       {!disableHover && showInlineActions && (
-        <div className="w-full relative z-30">
+        <div className="relative z-30 w-full">
           <CardActions
             mediaType={mediaType}
             ids={ids}
@@ -238,7 +244,7 @@ export function MediaCard({
       )}
 
       {!disableHover && showInlineActions && (
-        <div className="mt-2.5 flex w-full flex-col items-center px-1 text-center pb-1">
+        <div className="mt-2.5 flex w-full flex-col items-center px-1 pb-1 text-center">
           <Link
             href={href}
             className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-red-500"
@@ -275,7 +281,7 @@ export function MediaCard({
                 {remaining} {remaining === 1 ? "Episode" : "Episodes"} Left
               </span>
             </div>
-            <div className="absolute top-full left-1/2 -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+            <div className="absolute left-1/2 top-full -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
           </div>,
           document.body,
         )}

@@ -46,3 +46,4 @@ sqlite.db
 .claude
 /dist/
 .wrangler
+.env*.local
