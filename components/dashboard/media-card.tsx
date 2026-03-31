@@ -84,13 +84,16 @@ export function MediaCard({
   const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
 
   const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
+  const [mounted, setMounted] = useState(false);
 
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
 
+  // Set mounted to true on client-side only to handle hydration properly
   useEffect(() => {
+    setMounted(true);
     if (userRating !== undefined) {
       setOptimisticRating(userRating);
     }
@@ -107,9 +110,7 @@ export function MediaCard({
     setIsHovered(true);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    setMousePos({ x: e.pageX, y: e.pageY });
-  };
+  const handleMouseMove = (e: React.MouseEvent) => setMousePos({ x: e.pageX, y: e.pageY });
 
   const handleRate = (newRating: number) => {
     setOptimisticRating(newRating === 0 ? undefined : newRating);
@@ -121,14 +122,12 @@ export function MediaCard({
   const percentage =
     airedCount > 0 ? Math.min(100, Math.round((completedCount / airedCount) * 100)) : 0;
   const remaining = Math.max(0, airedCount - completedCount);
-
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
   const isTopTag = specialTag && specialTag !== "New Episode";
 
   return (
     <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
-      {/* 1. IMAGE SECTION */}
       <div className="relative">
         <Link
           href={href}
@@ -159,12 +158,11 @@ export function MediaCard({
               </div>
             )}
 
-            {showInlineActions && optimisticRating != null && optimisticRating > 0 && (
+            {/* RATING RIBBON: Using style instead of dynamic classes for Vercel stability */}
+            {mounted && showInlineActions && optimisticRating != null && optimisticRating > 0 && (
               <div
-                className="absolute top-0 right-0 z-50 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none drop-shadow-sm"
-                style={{
-                  borderTopColor: RIBBON_COLORS[Math.round(optimisticRating)] || "#71717a",
-                }}
+                className="absolute top-0 right-0 z-50 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none drop-shadow-md"
+                style={{ borderTopColor: RIBBON_COLORS[Math.round(optimisticRating)] }}
               >
                 <span className="absolute -top-[34px] -left-[16px] text-[10px] font-black text-white tabular-nums">
                   {optimisticRating}
@@ -212,7 +210,6 @@ export function MediaCard({
         )}
       </div>
 
-      {/* 2. BUTTONS SECTION (Glued to the image) */}
       {!disableHover && showInlineActions && (
         <div className="w-full relative z-30">
           <CardActions
@@ -228,7 +225,6 @@ export function MediaCard({
         </div>
       )}
 
-      {/* 3. TEXT SECTION (Pushed below the buttons) */}
       {!disableHover && showInlineActions && (
         <div className="mt-2.5 flex w-full flex-col items-center px-1 text-center pb-1">
           <Link
@@ -237,7 +233,6 @@ export function MediaCard({
           >
             {mediaType !== "movies" ? subtitle : title}
           </Link>
-
           {mediaType !== "movies" && showHref ? (
             <Link
               href={showHref}
@@ -253,16 +248,13 @@ export function MediaCard({
         </div>
       )}
 
-      {/* HOVER PORTAL */}
       {isHovered &&
+        mounted &&
         typeof document !== "undefined" &&
         createPortal(
           <div
             className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"
-            style={{
-              top: `${targetY - 35}px`,
-              left: `${targetX}px`,
-            }}
+            style={{ top: `${targetY - 35}px`, left: `${targetX}px` }}
           >
             <div className="flex items-center gap-1.5">
               <span className="text-red-500">{percentage}% Watched</span>
