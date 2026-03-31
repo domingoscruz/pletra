@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { Suspense } from "react";
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
@@ -8,6 +11,7 @@ import { CardGrid } from "./card-grid";
 export async function ContinueWatching() {
   const client = await getAuthenticatedTraktClient();
 
+  // Primary data fetch from Trakt API
   const [showsRes, moviesRes, epRatingsRes, movieRatingsRes] = await Promise.all([
     client.sync.progress.upNext.nitro({
       query: { page: 1, limit: 30, intent: "continue", extended: "full" } as any,
@@ -22,6 +26,7 @@ export async function ContinueWatching() {
   const shows = showsRes.status === 200 ? showsRes.body : [];
   const movies = moviesRes.status === 200 ? moviesRes.body : [];
 
+  // Map user ratings for quick lookup
   const epRatingMap = new Map<number, number>();
   const movieRatingMap = new Map<number, number>();
 
@@ -44,6 +49,7 @@ export async function ContinueWatching() {
   type ShowItem = (typeof shows)[number];
   type MovieItem = (typeof movies)[number];
 
+  // Fetch seasonal data to handle aired episode counts accurately
   const showSeasonsRes = await Promise.all(
     (shows as ShowItem[]).map((item) => {
       const slug = item.show?.ids?.slug;
@@ -70,6 +76,7 @@ export async function ContinueWatching() {
     }
   });
 
+  // Fetch images from TMDB for all items
   const [showImages, seasonImages, movieImages] = await Promise.all([
     Promise.all(
       (shows as ShowItem[]).map((item) => {
@@ -100,6 +107,7 @@ export async function ContinueWatching() {
 
   const items: (MediaCardProps & { lastWatchedAt: number; keyId: string })[] = [];
 
+  // Process TV Shows
   (shows as ShowItem[]).forEach((item, i) => {
     const show = item.show;
     const nextEp = item.progress?.next_episode;
@@ -188,6 +196,7 @@ export async function ContinueWatching() {
     });
   });
 
+  // Process Movies
   (movies as MovieItem[]).forEach((item, i) => {
     const movie = item.movie;
     const movieProgress = (item as any).progress as number | undefined;
@@ -228,6 +237,7 @@ export async function ContinueWatching() {
     });
   });
 
+  // Sort all items by last watched date
   items.sort((a, b) => b.lastWatchedAt - a.lastWatchedAt);
 
   if (items.length === 0) return null;
