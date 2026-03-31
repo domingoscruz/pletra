@@ -93,12 +93,10 @@ export function MediaCard({
 
   useEffect(() => {
     setMounted(true);
-    // DEBUG LOG
     if (userRating !== undefined) {
-      console.log(`[DEBUG RIBBON] ${title} - userRating received:`, userRating);
       setOptimisticRating(userRating);
     }
-  }, [userRating, title]);
+  }, [userRating]);
 
   const handleMouseEnter = () => {
     if (barRef.current) {
@@ -127,13 +125,17 @@ export function MediaCard({
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
   const isTopTag = specialTag && specialTag !== "New Episode";
 
+  // Safeguard for the color mapping on production
+  const ribbonColor = optimisticRating
+    ? RIBBON_COLORS[Math.floor(optimisticRating)]
+    : "transparent";
+
   return (
     <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
       <div className="relative">
-        {/* Adjusted overflow to prevent clipping the ribbon tail */}
         <Link
           href={href}
-          className="relative overflow-hidden rounded-tl-lg rounded-bl-lg rounded-br-lg bg-zinc-900 block border border-white/5 transition-all hover:border-white/20 active:scale-[0.98]"
+          className="relative overflow-hidden rounded-t-lg bg-zinc-900 block border border-white/5 transition-all hover:border-white/20 active:scale-[0.98]"
         >
           <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
             {imageUrl ? (
@@ -160,16 +162,21 @@ export function MediaCard({
               </div>
             )}
 
-            {/* RATING RIBBON: Using explicit z-index and conditional check */}
+            {/* FIXED RIBBON SECTION */}
             {mounted && showInlineActions && optimisticRating && optimisticRating > 0 ? (
               <div
-                className="absolute top-0 right-0 z-[60] h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none"
+                className="absolute top-0 right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
                 style={{
-                  borderTopColor: RIBBON_COLORS[Math.round(optimisticRating)],
-                  filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.5))",
+                  borderTop: "38px solid",
+                  borderLeft: "38px solid transparent",
+                  borderTopColor: ribbonColor,
+                  display: "block",
                 }}
               >
-                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-black text-white tabular-nums">
+                <span
+                  className="absolute font-black text-white tabular-nums"
+                  style={{ top: "-34px", left: "-16px", fontSize: "10px" }}
+                >
                   {optimisticRating}
                 </span>
               </div>
@@ -215,7 +222,6 @@ export function MediaCard({
         )}
       </div>
 
-      {/* BUTTONS SECTION */}
       {!disableHover && showInlineActions && (
         <div className="w-full relative z-30">
           <CardActions
@@ -231,7 +237,6 @@ export function MediaCard({
         </div>
       )}
 
-      {/* TEXT SECTION */}
       {!disableHover && showInlineActions && (
         <div className="mt-2.5 flex w-full flex-col items-center px-1 text-center pb-1">
           <Link
