@@ -6,6 +6,9 @@ import { ProxiedImage as Avatar } from "@/components/ui/proxied-image";
 import { CardGrid } from "./card-grid";
 import { MediaCard } from "./media-card";
 
+// Note: Removed "use client" and unused React hooks.
+// This is now a pure Server Component.
+
 export async function FriendsActivity() {
   const client = await getAuthenticatedTraktClient();
 
@@ -36,7 +39,14 @@ export async function FriendsActivity() {
   type HistoryItem = {
     id?: number;
     watched_at?: string;
-    action?: string;
+    action?:
+      | "scrobble"
+      | "checkin"
+      | "watch"
+      | "season_finale"
+      | "series_finale"
+      | "season_premiere"
+      | "series_premiere";
     type?: string;
     episode?: {
       season?: number;
@@ -88,17 +98,14 @@ export async function FriendsActivity() {
 
       if (tmdbId) {
         if (isEpisode) {
-          // Implementação da lógica de fallback para episódios
           const [epImgs, showImgs] = await Promise.all([
             fetchTmdbImages(tmdbId, "tv", activity.episode?.season, activity.episode?.number),
             fetchTmdbImages(tmdbId, "tv"),
           ]);
 
-          // Hierarquia: Still do Episódio -> Backdrop da Série -> Poster da Temporada -> Poster da Série
           finalImageUrl =
             epImgs?.still || showImgs?.backdrop || epImgs?.poster || showImgs?.poster || null;
         } else {
-          // Lógica para filmes
           const movieImgs = await fetchTmdbImages(tmdbId, "movie");
           finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
         }
@@ -119,10 +126,18 @@ export async function FriendsActivity() {
         ? `/shows/${activity.show?.ids?.slug}/seasons/${activity.episode?.season}/episodes/${activity.episode?.number}`
         : `/movies/${activity.movie?.ids?.slug}`;
 
+      // Detection logic for the Season Finale banner
+      let specialTag: any = undefined;
+      if (activity.action === "season_finale") specialTag = "Season Finale";
+      else if (activity.action === "series_finale") specialTag = "Series Finale";
+      else if (activity.action === "season_premiere") specialTag = "Season Premiere";
+      else if (activity.action === "series_premiere") specialTag = "Series Premiere";
+
       return {
         title,
         subtitle,
         href,
+        specialTag,
         showHref: isEpisode ? `/shows/${activity.show?.ids?.slug}` : undefined,
         backdropUrl: finalImageUrl,
         mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
@@ -169,6 +184,7 @@ export async function FriendsActivity() {
             ids={item.ids}
             episodeIds={item.episodeIds}
             badge={formatTimeAgo(item.watched_at)}
+            specialTag={item.specialTag}
             showInlineActions={false}
             variant={item.variant}
           />

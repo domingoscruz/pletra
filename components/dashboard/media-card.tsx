@@ -20,15 +20,12 @@ const RIBBON_COLORS: Record<number, string> = {
   1: "#71717a",
 };
 
-// Map Trakt Nitro Completion color to special tags
 const SPECIAL_TAG_COLORS: Record<string, string> = {
   "Series Premiere": "bg-[#60a5fa]",
   "Season Premiere": "bg-[#45b449]",
   "Season Finale": "bg-[#ef4444]",
   "Series Finale": "bg-[#9b1d9c]",
-  // New: Match the vibrant Trakt Nitro checkmark purple (#9333ea)
-  "New Episode":
-    "bg-[#9333ea] text-white bottom-2.5 right-2.5 rounded px-2.5 py-1.5 text-[11px] shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10",
+  "New Episode": "bg-[#9333ea]",
 };
 
 export interface MediaCardProps {
@@ -85,7 +82,6 @@ export function MediaCard({
   const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
   const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
 
-  // Hover Logic (Fixed Regression)
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
@@ -125,6 +121,8 @@ export function MediaCard({
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
 
+  const isTopTag = specialTag && specialTag !== "New Episode";
+
   return (
     <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
       <div className="relative">
@@ -146,13 +144,23 @@ export function MediaCard({
               </div>
             )}
 
-            {specialTag && (
+            {/* Top Banner Tags (Premiere/Finale) */}
+            {isTopTag && (
               <div
                 className={cn(
-                  "absolute z-40 flex font-black uppercase tracking-widest ring-1 ring-black/20 shadow-xl leading-none",
-                  specialTag === "New Episode"
-                    ? "" // Bottom/Right handled by color map
-                    : "inset-x-0 top-0 h-[22px] items-center justify-center text-[10px] text-white",
+                  "absolute inset-x-0 top-0 z-40 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-widest text-white shadow-md leading-none ring-1 ring-black/10",
+                  SPECIAL_TAG_COLORS[specialTag],
+                )}
+              >
+                {specialTag}
+              </div>
+            )}
+
+            {/* Bottom Right Badge (New Episode) */}
+            {specialTag === "New Episode" && (
+              <div
+                className={cn(
+                  "absolute bottom-2.5 right-2.5 z-40 flex items-center justify-center rounded px-2.5 py-1.5 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10 leading-none",
                   SPECIAL_TAG_COLORS[specialTag],
                 )}
               >
@@ -171,8 +179,14 @@ export function MediaCard({
               </div>
             )}
 
-            {badge && specialTag !== "New Episode" && (
-              <div className="absolute top-2 left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none">
+            {/* Badge (S01E01) - Moves down if there is a Top Tag to avoid overlap */}
+            {badge && (
+              <div
+                className={cn(
+                  "absolute z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none transition-all",
+                  isTopTag ? "top-[28px] left-2" : "top-2 left-2",
+                )}
+              >
                 {badge}
               </div>
             )}

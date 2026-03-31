@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { X, Tv, Film, AlertCircle } from "lucide-react";
+import { X, Tv, Film, AlertCircle, Minus } from "lucide-react";
 import { ProxiedImage } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
@@ -27,10 +27,13 @@ export function WatchingToast() {
   const [scrobble, setScrobble] = useState<TraktWatchingResponse | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [isClosedManually, setIsClosedManually] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [smoothProgress, setSmoothProgress] = useState(0);
 
+  // Rate Limiting & Polling state
+  const [backoffMs, setBackoffMs] = useState(0);
   const lastMediaId = useRef<number | null>(null);
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
   const isFetching = useRef(false);
@@ -46,66 +49,61 @@ export function WatchingToast() {
         headers: { "X-Poll-Request": "true" },
       });
 
+      if (res.status === 429) {
+        console.warn("Trakt API Rate Limited. Increasing backoff...");
+        setBackoffMs((prev) => Math.min(prev + 60000, 300000));
+        return;
+      }
+
       if (res.status === 204) {
         setIsVisible(false);
         setScrobble(null);
         setImageUrl(null);
         lastMediaId.current = null;
+        setBackoffMs(0);
         return;
       }
-
-      if (res.status === 429) return;
 
       const text = await res.text();
-      if (!text || text.trim().startsWith("<")) {
-        if (!scrobble) setIsVisible(false);
-        return;
-      }
+      if (!text || text.trim().startsWith("<")) return;
 
       const data = JSON.parse(text) as TraktWatchingResponse;
 
       if (data && data.type) {
+        setBackoffMs(0);
         const currentId =
           data.type === "episode" ? data.episode?.ids?.trakt : data.movie?.ids?.trakt;
 
         if (currentId !== lastMediaId.current) {
           lastMediaId.current = currentId ?? null;
+          const isEpisode = data.type === "episode";
+          const tmdbId = isEpisode ? data.show?.ids?.tmdb : data.movie?.ids?.tmdb;
 
-          try {
-            const isEpisode = data.type === "episode";
-            const tmdbId = isEpisode ? data.show?.ids?.tmdb : data.movie?.ids?.tmdb;
-
-            if (tmdbId) {
-              const imgs = await getTmdbImageAction(
-                tmdbId,
-                isEpisode ? "tv" : "movie",
-                isEpisode ? data.episode?.season : undefined,
-                isEpisode ? data.episode?.number : undefined,
-              );
-
-              const finalImageUrl = imgs?.still || imgs?.backdrop || imgs?.poster || null;
-              setImageUrl(finalImageUrl);
-            } else {
-              setImageUrl(null);
-            }
-          } catch (err) {
-            setImageUrl(null);
+          if (tmdbId) {
+            const imgs = await getTmdbImageAction(
+              tmdbId,
+              isEpisode ? "tv" : "movie",
+              isEpisode ? data.episode?.season : undefined,
+              isEpisode ? data.episode?.number : undefined,
+            );
+            setImageUrl(imgs?.still || imgs?.backdrop || imgs?.poster || null);
           }
         }
         setScrobble(data);
         setIsVisible(true);
       }
     } catch (e) {
-      console.error("Error fetching watching status:", e);
+      console.error("Watching check failed:", e);
     } finally {
       isFetching.current = false;
     }
-  }, [isClosedManually, scrobble]);
+  }, [isClosedManually]);
 
   useEffect(() => {
     const runPolling = () => {
       checkWatching();
-      const nextInterval = document.hidden ? 150000 : 45000;
+      const baseInterval = document.hidden ? 180000 : 45000;
+      const nextInterval = baseInterval + backoffMs;
       pollTimer.current = setTimeout(runPolling, nextInterval);
     };
 
@@ -119,8 +117,9 @@ export function WatchingToast() {
     };
 
     const handleCustomCheckin = () => {
-      // Reset manual close only when a new explicit check-in or update happens
       setIsClosedManually(false);
+      setIsMinimized(false);
+      setBackoffMs(0);
       if (pollTimer.current) clearTimeout(pollTimer.current);
       runPolling();
     };
@@ -133,7 +132,7 @@ export function WatchingToast() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("trakt-checkin-updated", handleCustomCheckin);
     };
-  }, [checkWatching, isClosedManually]);
+  }, [checkWatching, isClosedManually, backoffMs]);
 
   useEffect(() => {
     if (!scrobble) return;
@@ -144,36 +143,26 @@ export function WatchingToast() {
       const totalDuration = end - start;
       const elapsed = now - start;
       if (totalDuration > 0) {
-        const currentPos = (elapsed / totalDuration) * 100;
-        setSmoothProgress(Math.min(100, Math.max(0, currentPos)));
+        setSmoothProgress(Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)));
       }
     };
-    updateProgress();
     const frame = setInterval(updateProgress, 1000);
     return () => clearInterval(frame);
   }, [scrobble]);
 
   const handleCancelCheckin = async () => {
-    // 1. Instant UI Lock
     setIsVisible(false);
-    setIsClosedManually(true); // This prevents the poller from showing it again
+    setIsClosedManually(true);
     setShowCancelConfirm(false);
-
     if (pollTimer.current) clearTimeout(pollTimer.current);
 
     try {
-      // 2. Perform the actual DELETE
-      const res = await fetch("/api/trakt/checkin", { method: "DELETE" });
-
-      // 3. Clear local cache and force server revalidation
+      await fetch("/api/trakt/checkin", { method: "DELETE" });
       setScrobble(null);
-      setImageUrl(null);
       lastMediaId.current = null;
-
-      // 4. Update the Grid (Move from Recently Watched back to Continue Watching)
       router.refresh();
     } catch (e) {
-      console.error("Failed to cancel check-in", e);
+      console.error("Cancel failed:", e);
     }
   };
 
@@ -185,12 +174,37 @@ export function WatchingToast() {
     : scrobble.movie?.title;
   const subTitle = isEpisode ? scrobble.show?.title : scrobble.movie?.year;
   const showSlug = isEpisode ? scrobble.show?.ids.slug : scrobble.movie?.ids.slug;
+
+  const movieHref = !isEpisode && showSlug ? `/movies/${showSlug}` : null;
   const episodeHref =
     isEpisode && showSlug
       ? `/shows/${showSlug}/seasons/${scrobble.episode?.season}/episodes/${scrobble.episode?.number}`
       : null;
-  const showHref = showSlug ? (isEpisode ? `/shows/${showSlug}` : `/movies/${showSlug}`) : null;
 
+  const mainHref = isEpisode ? episodeHref : movieHref;
+  const subHref = isEpisode ? (showSlug ? `/shows/${showSlug}` : null) : movieHref;
+
+  // Minimized View
+  if (isMinimized) {
+    return (
+      <button
+        onClick={() => setIsMinimized(false)}
+        className="fixed bottom-6 right-6 z-[100] flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black shadow-2xl transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-2"
+      >
+        {/* FIXED: Single darker pulsing dot */}
+        <div className="absolute top-0 right-0 z-10 flex h-3 w-3 items-center justify-center">
+          <span className="animate-pulse rounded-full bg-red-800 h-2.5 w-2.5 shadow-[0_0_8px_rgba(153,27,27,0.8)]"></span>
+        </div>
+        {isEpisode ? (
+          <Tv size={24} className="text-zinc-400" />
+        ) : (
+          <Film size={24} className="text-zinc-400" />
+        )}
+      </button>
+    );
+  }
+
+  // Full Toast View
   return (
     <div className="fixed bottom-6 right-6 z-[100] w-[380px] select-none overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_20px_50px_rgba(0,0,0,1)] animate-in fade-in slide-in-from-bottom-4 duration-300">
       {showCancelConfirm && (
@@ -202,13 +216,13 @@ export function WatchingToast() {
           <div className="mt-4 flex gap-2">
             <button
               onClick={handleCancelCheckin}
-              className="rounded-lg bg-red-600 px-4 py-1.5 text-[9px] font-black uppercase text-white hover:bg-red-500 transition-all active:scale-95"
+              className="rounded-lg bg-red-600 px-4 py-1.5 text-[9px] font-black uppercase text-white hover:bg-red-500"
             >
               Confirm
             </button>
             <button
               onClick={() => setShowCancelConfirm(false)}
-              className="rounded-lg bg-zinc-800 px-4 py-1.5 text-[9px] font-black uppercase text-zinc-400 hover:text-white transition-all active:scale-95"
+              className="rounded-lg bg-zinc-800 px-4 py-1.5 text-[9px] font-black uppercase text-zinc-400 hover:text-white"
             >
               Back
             </button>
@@ -219,20 +233,28 @@ export function WatchingToast() {
       <div className="relative flex flex-col gap-4 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="flex h-2 w-2">
-              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-red-500 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-red-600"></span>
+            {/* FIXED: Single darker pulsing dot in header */}
+            <div className="relative flex h-2 w-2 items-center justify-center">
+              <span className="animate-pulse rounded-full bg-red-800 h-2 w-2"></span>
             </div>
             <span className="text-[9px] font-black uppercase tracking-[0.3em] text-red-500">
               Watching Now
             </span>
           </div>
-          <button
-            onClick={() => setShowCancelConfirm(true)}
-            className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
-          >
-            <X size={14} strokeWidth={3} />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsMinimized(true)}
+              className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
+            >
+              <Minus size={14} strokeWidth={3} />
+            </button>
+            <button
+              onClick={() => setShowCancelConfirm(true)}
+              className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
+            >
+              <X size={14} strokeWidth={3} />
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
@@ -258,9 +280,9 @@ export function WatchingToast() {
           </div>
 
           <div className="flex flex-1 flex-col justify-center min-w-0">
-            {episodeHref ? (
+            {mainHref ? (
               <Link
-                href={episodeHref}
+                href={mainHref}
                 className="truncate text-[12px] font-black text-white uppercase tracking-tight leading-tight hover:text-red-500 transition-colors"
               >
                 {mainTitle}
@@ -270,9 +292,10 @@ export function WatchingToast() {
                 {mainTitle}
               </h4>
             )}
-            {showHref ? (
+
+            {subHref ? (
               <Link
-                href={showHref}
+                href={subHref}
                 className="mt-1 truncate text-[9px] font-bold text-zinc-500 uppercase tracking-widest hover:text-zinc-200 transition-colors"
               >
                 {subTitle}
