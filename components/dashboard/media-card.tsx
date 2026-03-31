@@ -83,7 +83,6 @@ export function MediaCard({
   const isPoster = variant === "poster";
   const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
 
-  // REVERTED: Original state initialization
   const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
 
   const [isHovered, setIsHovered] = useState(false);
@@ -91,9 +90,10 @@ export function MediaCard({
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
 
-  // REVERTED: Original exact useEffect synchronization
   useEffect(() => {
-    setOptimisticRating(userRating);
+    if (userRating !== undefined) {
+      setOptimisticRating(userRating);
+    }
   }, [userRating]);
 
   const handleMouseEnter = () => {
@@ -128,6 +128,7 @@ export function MediaCard({
 
   return (
     <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
+      {/* 1. IMAGE SECTION */}
       <div className="relative">
         <Link
           href={href}
@@ -158,13 +159,14 @@ export function MediaCard({
               </div>
             )}
 
-            {/* REVERTED: Original exact ribbon code that worked perfectly before */}
-            {showInlineActions && optimisticRating != null && (
+            {showInlineActions && optimisticRating != null && optimisticRating > 0 && (
               <div
-                className="absolute top-0 right-0 z-10 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none"
-                style={{ borderTopColor: RIBBON_COLORS[optimisticRating as number] }}
+                className="absolute top-0 right-0 z-50 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none drop-shadow-sm"
+                style={{
+                  borderTopColor: RIBBON_COLORS[Math.round(optimisticRating)] || "#71717a",
+                }}
               >
-                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-bold text-white tabular-nums">
+                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-black text-white tabular-nums">
                   {optimisticRating}
                 </span>
               </div>
@@ -210,8 +212,25 @@ export function MediaCard({
         )}
       </div>
 
+      {/* 2. BUTTONS SECTION (Glued to the image) */}
       {!disableHover && showInlineActions && (
-        <div className="mt-2 flex w-full flex-col items-center px-1 text-center">
+        <div className="w-full relative z-30">
+          <CardActions
+            mediaType={mediaType}
+            ids={ids}
+            episodeIds={episodeIds}
+            userRating={optimisticRating || undefined}
+            globalRating={typeof rating === "number" ? Math.round(rating * 10) : 0}
+            releasedAt={releasedAt}
+            isWatched={isWatched}
+            onRate={handleRate}
+          />
+        </div>
+      )}
+
+      {/* 3. TEXT SECTION (Pushed below the buttons) */}
+      {!disableHover && showInlineActions && (
+        <div className="mt-2.5 flex w-full flex-col items-center px-1 text-center pb-1">
           <Link
             href={href}
             className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-red-500"
@@ -231,23 +250,10 @@ export function MediaCard({
               {mediaType !== "movies" ? title : subtitle}
             </p>
           )}
-
-          {/* Action container: kept the relative wrapper for proper popover positioning */}
-          <div className="mt-2 w-full relative">
-            <CardActions
-              mediaType={mediaType}
-              ids={ids}
-              episodeIds={episodeIds}
-              userRating={optimisticRating || undefined}
-              globalRating={typeof rating === "number" ? Math.round(rating * 10) : 0}
-              releasedAt={releasedAt}
-              isWatched={isWatched}
-              onRate={handleRate}
-            />
-          </div>
         </div>
       )}
 
+      {/* HOVER PORTAL */}
       {isHovered &&
         typeof document !== "undefined" &&
         createPortal(
