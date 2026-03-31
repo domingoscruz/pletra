@@ -82,15 +82,17 @@ export function MediaCard({
 }: MediaCardProps) {
   const isPoster = variant === "poster";
   const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
-  const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
 
+  const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setOptimisticRating(userRating);
+    if (userRating !== undefined) {
+      setOptimisticRating(userRating);
+    }
   }, [userRating]);
 
   const handleMouseEnter = () => {
@@ -115,15 +117,12 @@ export function MediaCard({
 
   const airedCount = totalAired ?? progress?.aired ?? 0;
   const completedCount = progress?.completed ?? 0;
-
   const percentage =
     airedCount > 0 ? Math.min(100, Math.round((completedCount / airedCount) * 100)) : 0;
-
   const remaining = Math.max(0, airedCount - completedCount);
 
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
-
   const isTopTag = specialTag && specialTag !== "New Episode";
 
   return (
@@ -158,6 +157,19 @@ export function MediaCard({
               </div>
             )}
 
+            {/* Corrected Rating Ribbon Z-Index and condition */}
+            {showInlineActions && optimisticRating != null && optimisticRating > 0 && (
+              <div
+                key={`ribbon-${optimisticRating}`}
+                className="absolute top-0 right-0 z-50 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none drop-shadow-md transition-all animate-in slide-in-from-top-2"
+                style={{ borderTopColor: RIBBON_COLORS[optimisticRating] || "#71717a" }}
+              >
+                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-black text-white tabular-nums">
+                  {optimisticRating}
+                </span>
+              </div>
+            )}
+
             {specialTag === "New Episode" && (
               <div
                 className={cn(
@@ -166,17 +178,6 @@ export function MediaCard({
                 )}
               >
                 {specialTag}
-              </div>
-            )}
-
-            {showInlineActions && optimisticRating != null && (
-              <div
-                className="absolute top-0 right-0 z-10 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none"
-                style={{ borderTopColor: RIBBON_COLORS[optimisticRating] }}
-              >
-                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-bold text-white tabular-nums">
-                  {optimisticRating}
-                </span>
               </div>
             )}
 
@@ -208,28 +209,6 @@ export function MediaCard({
           </div>
         )}
       </div>
-
-      {isHovered &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"
-            style={{
-              top: `${targetY - 35}px`,
-              left: `${targetX}px`,
-            }}
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="text-red-500">{percentage}% Watched</span>
-              <span className="text-zinc-600">•</span>
-              <span>
-                {remaining} {remaining === 1 ? "Episode" : "Episodes"} Left
-              </span>
-            </div>
-            <div className="absolute top-full left-1/2 -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
-          </div>,
-          document.body,
-        )}
 
       {!disableHover && showInlineActions && (
         <div className="mt-2 flex w-full flex-col items-center px-1 text-center">
@@ -267,6 +246,28 @@ export function MediaCard({
           </div>
         </div>
       )}
+
+      {isHovered &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"
+            style={{
+              top: `${targetY - 35}px`,
+              left: `${targetX}px`,
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-red-500">{percentage}% Watched</span>
+              <span className="text-zinc-600">•</span>
+              <span>
+                {remaining} {remaining === 1 ? "Episode" : "Episodes"} Left
+              </span>
+            </div>
+            <div className="absolute top-full left-1/2 -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
