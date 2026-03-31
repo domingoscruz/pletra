@@ -83,6 +83,7 @@ export function MediaCard({
   const isPoster = variant === "poster";
   const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
 
+  // REVERTED: Original state initialization
   const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
 
   const [isHovered, setIsHovered] = useState(false);
@@ -90,11 +91,9 @@ export function MediaCard({
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
 
-  // CRITICAL FIX: Ignore undefined userRatings during rapid cache reloads
+  // REVERTED: Original exact useEffect synchronization
   useEffect(() => {
-    if (userRating !== undefined) {
-      setOptimisticRating(userRating);
-    }
+    setOptimisticRating(userRating);
   }, [userRating]);
 
   const handleMouseEnter = () => {
@@ -129,7 +128,7 @@ export function MediaCard({
 
   return (
     <div className="group relative flex flex-col w-full antialiased animate-in fade-in duration-300">
-      <div className="relative z-0">
+      <div className="relative">
         <Link
           href={href}
           className="relative overflow-hidden rounded-t-lg bg-zinc-900 block border border-white/5 transition-all hover:border-white/20 active:scale-[0.98]"
@@ -151,7 +150,7 @@ export function MediaCard({
             {isTopTag && (
               <div
                 className={cn(
-                  "absolute inset-x-0 top-0 z-10 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-widest text-white shadow-md leading-none ring-1 ring-black/10",
+                  "absolute inset-x-0 top-0 z-40 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-widest text-white shadow-md leading-none ring-1 ring-black/10",
                   SPECIAL_TAG_COLORS[specialTag],
                 )}
               >
@@ -159,22 +158,22 @@ export function MediaCard({
               </div>
             )}
 
-            {showInlineActions && optimisticRating != null && optimisticRating > 0 ? (
+            {/* REVERTED: Original exact ribbon code that worked perfectly before */}
+            {showInlineActions && optimisticRating != null && (
               <div
-                key={`ribbon-${optimisticRating}`}
-                className="absolute top-0 right-0 z-20 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none drop-shadow-md transition-all animate-in slide-in-from-top-2"
-                style={{ borderTopColor: RIBBON_COLORS[Math.floor(optimisticRating)] || "#71717a" }}
+                className="absolute top-0 right-0 z-10 h-0 w-0 border-t-[38px] border-l-[38px] border-l-transparent pointer-events-none"
+                style={{ borderTopColor: RIBBON_COLORS[optimisticRating as number] }}
               >
-                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-black text-white tabular-nums">
+                <span className="absolute -top-[34px] -left-[16px] text-[10px] font-bold text-white tabular-nums">
                   {optimisticRating}
                 </span>
               </div>
-            ) : null}
+            )}
 
             {specialTag === "New Episode" && (
               <div
                 className={cn(
-                  "absolute bottom-2.5 right-2.5 z-10 flex items-center justify-center rounded px-2.5 py-1.5 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10 leading-none",
+                  "absolute bottom-2.5 right-2.5 z-40 flex items-center justify-center rounded px-2.5 py-1.5 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10 leading-none",
                   SPECIAL_TAG_COLORS[specialTag],
                 )}
               >
@@ -185,7 +184,7 @@ export function MediaCard({
             {badge && (
               <div
                 className={cn(
-                  "absolute z-10 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none transition-all",
+                  "absolute z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white backdrop-blur-md ring-1 ring-white/10 shadow-xl pointer-events-none transition-all",
                   isTopTag ? "top-[28px] left-2" : "top-2 left-2",
                 )}
               >
@@ -201,7 +200,7 @@ export function MediaCard({
             onMouseEnter={handleMouseEnter}
             onMouseLeave={() => setIsHovered(false)}
             onMouseMove={handleMouseMove}
-            className="group/progress absolute inset-x-0 bottom-0 z-30 h-[4px] cursor-default transition-all hover:h-[8px]"
+            className="group/progress absolute inset-x-0 bottom-0 z-50 h-[4px] cursor-default transition-all hover:h-[8px]"
           >
             <div
               className="h-full bg-red-600 shadow-[0_0_8px_rgba(239,68,68,0.4)] transition-all duration-300 group-hover/progress:bg-red-500"
@@ -233,6 +232,7 @@ export function MediaCard({
             </p>
           )}
 
+          {/* Action container: kept the relative wrapper for proper popover positioning */}
           <div className="mt-2 w-full relative">
             <CardActions
               mediaType={mediaType}
