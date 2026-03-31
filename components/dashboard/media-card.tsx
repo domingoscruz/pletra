@@ -253,14 +253,13 @@ export function MediaCard({
             </p>
           )}
 
-          {/* Action container: relative positioning helps the child popover stay within bounds */}
           <div className="mt-2 w-full relative">
             <CardActions
               mediaType={mediaType}
               ids={ids}
               episodeIds={episodeIds}
               userRating={optimisticRating || undefined}
-              globalRating={rating ? Math.round(rating * 10) : null}
+              globalRating={typeof rating === "number" ? Math.round(rating * 10) : 0}
               releasedAt={releasedAt}
               isWatched={isWatched}
               onRate={handleRate}
