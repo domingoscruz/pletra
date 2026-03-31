@@ -3,12 +3,16 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { CardGrid } from "./card-grid";
 import { MediaCard } from "./media-card";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function RecentActivity() {
   const client = await getAuthenticatedTraktClient();
 
   if (!client) return null;
 
-  const [showRes, movieRes, epRatingsRes] = await Promise.all([
+  // CRITICAL FIX: Added client.users.ratings.movies to fetch movie ratings too!
+  const [showRes, movieRes, epRatingsRes, movieRatingsRes] = await Promise.all([
     client.users.history.shows({
       params: { id: "me" },
       query: { limit: 20, extended: "full" },
@@ -22,16 +26,31 @@ export async function RecentActivity() {
         params: { id: "me" },
       })
       .catch(() => null),
+    client.users.ratings
+      .movies({
+        params: { id: "me" },
+      })
+      .catch(() => null),
   ]);
 
   const showHistory = showRes.status === 200 ? showRes.body : [];
   const movieHistory = movieRes.status === 200 ? movieRes.body : [];
+
   const epRatingMap = new Map<number, number>();
+  const movieRatingMap = new Map<number, number>();
 
   if (epRatingsRes?.status === 200) {
     for (const r of epRatingsRes.body as any[]) {
       if (r.episode?.ids?.trakt && r.rating) {
         epRatingMap.set(r.episode.ids.trakt, r.rating);
+      }
+    }
+  }
+
+  if (movieRatingsRes?.status === 200) {
+    for (const r of movieRatingsRes.body as any[]) {
+      if (r.movie?.ids?.trakt && r.rating) {
+        movieRatingMap.set(r.movie.ids.trakt, r.rating);
       }
     }
   }
@@ -58,7 +77,6 @@ export async function RecentActivity() {
           fetchTmdbImages(tmdbId, "tv"),
         ]);
 
-        // Priority: Episode Still -> Show Backdrop -> Season Poster -> Show Poster
         finalImageUrl =
           epImgs?.still || showImgs?.backdrop || epImgs?.poster || showImgs?.poster || null;
       } else if (tmdbId) {
@@ -85,7 +103,9 @@ export async function RecentActivity() {
         showHref: isEpisode ? `/shows/${item.show?.ids?.slug}` : undefined,
         backdropUrl: finalImageUrl,
         rating: isEpisode ? item.episode?.rating : item.movie?.rating,
-        userRating: isEpisode ? epRatingMap.get(item.episode.ids.trakt) : undefined,
+        userRating: isEpisode
+          ? epRatingMap.get(item.episode.ids.trakt)
+          : movieRatingMap.get(item.movie.ids.trakt),
         mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
         ids: isEpisode ? (item.show?.ids ?? {}) : (item.movie?.ids ?? {}),
         episodeIds: isEpisode ? (item.episode?.ids ?? {}) : undefined,
@@ -114,8 +134,6 @@ export async function RecentActivity() {
         title="Recently Watched"
         defaultRows={2}
         rowSize={5}
-        // Responsive grid for landscape cards:
-        // 1 column on very small mobile, 2 on small, 3 on tablets, 4 on laptops, 5 on desktop
         gridClass="grid w-full grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-4 gap-y-6 sm:gap-y-8"
       >
         {items.map((item) => (
