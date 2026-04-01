@@ -126,8 +126,10 @@ export async function StartWatching() {
 
     const showItems = (showWatchlist as any[]).map((item, i) => {
       const epMeta = firstEpisodesMeta[i];
-      // Removed the colon between the episode number and the title
       const epTitle = epMeta?.title ? ` ${epMeta.title}` : "";
+
+      // Use episode air date for more accurate sorting in "Start Watching"
+      const dateToUse = epMeta?.first_aired ?? item.show?.first_aired;
 
       return {
         title: item.show?.title ?? "Unknown",
@@ -140,9 +142,9 @@ export async function StartWatching() {
         userRating: showRatingMap.get(item.show?.ids?.trakt),
         mediaType: "shows" as const,
         ids: item.show?.ids ?? {},
-        episodeIds: epMeta?.ids ?? {}, // Required for CardActions on episodes
-        releasedAt: epMeta?.first_aired ?? item.show?.first_aired ?? null, // Fallback to show date
-        airDate: item.show?.first_aired ? new Date(item.show.first_aired).getTime() : 0,
+        episodeIds: epMeta?.ids ?? {},
+        releasedAt: dateToUse ? String(dateToUse) : undefined,
+        airDate: dateToUse ? new Date(dateToUse).getTime() : 0,
       };
     });
 
@@ -158,7 +160,7 @@ export async function StartWatching() {
       userRating: movieRatingMap.get(item.movie?.ids?.trakt),
       mediaType: "movies" as const,
       ids: item.movie?.ids ?? {},
-      releasedAt: item.movie?.released ?? null,
+      releasedAt: item.movie?.released ? String(item.movie.released) : undefined,
       airDate: item.movie?.released ? new Date(item.movie.released).getTime() : 0,
     }));
 

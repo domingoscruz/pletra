@@ -4,25 +4,55 @@ import { useState, useMemo } from "react";
 import { MediaCard } from "./media-card";
 import { CardGrid } from "./card-grid";
 
-export function StartWatchingFilter({
-  showItems,
-  movieItems,
-}: {
-  showItems: any[];
-  movieItems: any[];
-}) {
+/**
+ * Interface strictly aligned with MediaCardProps requirements.
+ */
+interface TraktMediaItem {
+  ids: Record<string, any>;
+  episodeIds?: Record<string, any>;
+  title: string;
+  subtitle?: string;
+  href: string;
+  showHref?: string;
+  posterUrl?: string | null;
+  backdropUrl?: string | null;
+  mediaType: "movies" | "shows" | "episodes";
+  rating?: number;
+  userRating?: number | null;
+  releasedAt?: string | null;
+  airDate: number;
+}
+
+interface StartWatchingFilterProps {
+  showItems: TraktMediaItem[];
+  movieItems: TraktMediaItem[];
+}
+
+export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWatchingFilterProps) {
   const [filter, setFilter] = useState<"all" | "shows" | "movies">("all");
 
+  /**
+   * Memoized sorting and filtering logic.
+   */
   const filteredItems = useMemo(() => {
-    if (filter === "shows") return showItems;
-    if (filter === "movies") return movieItems;
+    let result: TraktMediaItem[] = [];
 
-    const allMovies = [...movieItems];
-    const allShows = [...showItems];
+    if (filter === "shows") {
+      result = [...showItems];
+    } else if (filter === "movies") {
+      result = [...movieItems];
+    } else {
+      result = [...movieItems, ...showItems];
+    }
 
-    return [...allMovies, ...allShows].sort((a, b) => b.airDate - a.airDate);
+    return result.sort((a, b) => b.airDate - a.airDate);
   }, [filter, showItems, movieItems]);
 
+  /**
+   * Renders the grid content.
+   * Wrapped in an array [ ] when returning the empty state to satisfy CardGrid's
+   * requirement for ReactNode[] (multiple children/array).
+   */
   const renderContent = () => {
     if (filteredItems.length === 0) {
       return [
@@ -42,9 +72,19 @@ export function StartWatchingFilter({
 
     return filteredItems.map((item) => (
       <MediaCard
-        key={`start-${item.mediaType}-${item.ids.trakt}`}
-        {...item}
+        key={`start-${item.mediaType}-${item.ids?.trakt}`}
+        title={item.title}
+        subtitle={item.subtitle}
+        href={item.href}
         showHref={item.showHref}
+        backdropUrl={item.backdropUrl ?? null}
+        posterUrl={item.posterUrl ?? null}
+        mediaType={item.mediaType}
+        rating={item.rating}
+        userRating={item.userRating}
+        ids={item.ids}
+        episodeIds={item.episodeIds}
+        releasedAt={item.releasedAt ?? undefined}
         variant="poster"
         showInlineActions={true}
       />
@@ -55,16 +95,11 @@ export function StartWatchingFilter({
     <section className="group/section w-full">
       <CardGrid
         title={
-          /*
-             Removed w-full and justify-between to keep the header compact.
-             Using flex-row on all screens to maintain the design from your screenshot.
-          */
           <div className="flex items-center gap-3 sm:gap-5">
             <span className="font-bold whitespace-nowrap text-zinc-100 text-[13px] sm:text-[14px]">
               Start Watching
             </span>
 
-            {/* Filter Toggle - Aligned close to the title */}
             <div className="flex items-center gap-1 rounded-md bg-zinc-900/80 p-1 ring-1 ring-white/10 pointer-events-auto">
               {(["all", "shows", "movies"] as const).map((f) => (
                 <button
