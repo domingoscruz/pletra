@@ -35,8 +35,9 @@ export interface MediaCardProps {
   showHref?: string;
   backdropUrl: string | null;
   posterUrl?: string | null;
+  showPosterUrl?: string | null;
   rating?: number;
-  userRating?: number;
+  userRating?: number | null;
   mediaType: "movies" | "shows" | "episodes";
   ids: Record<string, unknown>;
   episodeIds?: Record<string, unknown>;
@@ -52,12 +53,22 @@ export interface MediaCardProps {
     | "Season Finale"
     | "Series Finale"
     | "New Episode";
+  statusBadge?: string;
   badge?: string;
-  bottomBadge?: string;
+  timeBadge?: string;
   isWatched?: boolean;
   priority?: boolean;
+  /**
+   * If true, enables the automatic "New Episode" badge
+   * for content released within the last 48 hours.
+   */
+  showNewBadge?: boolean;
 }
 
+/**
+ * MediaCard component for displaying movies and shows.
+ * Includes conditional logic for a "New Episode" badge.
+ */
 export function MediaCard({
   title,
   subtitle,
@@ -65,6 +76,7 @@ export function MediaCard({
   showHref,
   backdropUrl,
   posterUrl,
+  showPosterUrl,
   rating,
   userRating,
   mediaType,
@@ -77,16 +89,35 @@ export function MediaCard({
   disableHover = false,
   showInlineActions = false,
   specialTag,
+  statusBadge,
   badge,
-  bottomBadge,
+  timeBadge,
   isWatched = false,
   priority = false,
+  showNewBadge = false,
 }: MediaCardProps) {
   const isPoster = variant === "poster";
-  const imageUrl = isPoster ? (posterUrl ?? backdropUrl) : backdropUrl;
 
-  const [optimisticRating, setOptimisticRating] = useState<number | undefined | null>(userRating);
+  const resolveImageUrl = (...urls: (string | null | undefined)[]): string | null => {
+    for (const url of urls) {
+      if (url && typeof url === "string" && url.trim() !== "") {
+        return url;
+      }
+    }
+    return null;
+  };
+
+  const imageUrl = isPoster
+    ? resolveImageUrl(posterUrl, showPosterUrl, backdropUrl)
+    : resolveImageUrl(backdropUrl, posterUrl, showPosterUrl);
+
+  const getNormalizedRating = (val?: number | null) => (val && val > 0 ? val : undefined);
+
+  const [optimisticRating, setOptimisticRating] = useState<number | undefined>(
+    getNormalizedRating(userRating),
+  );
   const [mounted, setMounted] = useState(false);
+  const localChange = useRef(false);
 
   const [isHovered, setIsHovered] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -95,10 +126,24 @@ export function MediaCard({
 
   useEffect(() => {
     setMounted(true);
-    if (userRating !== undefined) {
-      setOptimisticRating(userRating);
+    if (localChange.current) {
+      localChange.current = false;
+      return;
     }
+    setOptimisticRating(getNormalizedRating(userRating));
   }, [userRating]);
+
+  // Check for new release only if the prop showNewBadge is enabled
+  const checkIsNewRelease = () => {
+    if (!showNewBadge || !releasedAt || mediaType === "movies") return false;
+    const releaseDate = new Date(releasedAt).getTime();
+    const now = new Date().getTime();
+    const fortyEightHoursInMs = 48 * 60 * 60 * 1000;
+    const diff = now - releaseDate;
+    return diff >= 0 && diff <= fortyEightHoursInMs;
+  };
+
+  const isNewRelease = checkIsNewRelease();
 
   const handleMouseEnter = () => {
     if (barRef.current) {
@@ -114,8 +159,12 @@ export function MediaCard({
   const handleMouseMove = (e: React.MouseEvent) => setMousePos({ x: e.pageX, y: e.pageY });
 
   const handleRate = (newRating: number) => {
-    setOptimisticRating(newRating === 0 ? undefined : newRating);
+    localChange.current = true;
+    setOptimisticRating(getNormalizedRating(newRating));
     window.dispatchEvent(new Event("trakt-checkin-updated"));
+    setTimeout(() => {
+      localChange.current = false;
+    }, 2000);
   };
 
   const airedCount = totalAired ?? progress?.aired ?? 0;
@@ -125,8 +174,8 @@ export function MediaCard({
   const remaining = Math.max(0, airedCount - completedCount);
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
-  const isTopTag = specialTag && specialTag !== "New Episode";
 
+  const isTopTag = specialTag && specialTag !== "New Episode";
   const ribbonColor = optimisticRating
     ? RIBBON_COLORS[Math.floor(optimisticRating)]
     : "transparent";
@@ -136,9 +185,20 @@ export function MediaCard({
       <div className="relative">
         <Link
           href={href}
-          className="block overflow-hidden rounded-t-lg border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]"
+          className="block overflow-hidden rounded-lg border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]"
         >
           <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
+            {isTopTag && (
+              <div
+                className={cn(
+                  "absolute top-0 left-0 right-0 z-30 flex h-[20px] w-full items-center justify-center text-[9px] font-black uppercase tracking-[0.15em] text-white shadow-md leading-none ring-1 ring-black/10",
+                  SPECIAL_TAG_COLORS[specialTag] || "bg-zinc-800",
+                )}
+              >
+                {specialTag}
+              </div>
+            )}
+
             {imageUrl ? (
               <CardImage
                 src={imageUrl}
@@ -147,19 +207,41 @@ export function MediaCard({
                 priority={priority}
               />
             ) : (
-              <div className="flex h-full items-center justify-center bg-zinc-800 text-xl text-zinc-500">
-                🎬
+              <div className="flex h-full flex-col items-center justify-center bg-zinc-800 p-4 text-center">
+                <span className="text-xl opacity-50">🎬</span>
+                <span className="mt-2 text-[10px] font-bold uppercase tracking-tighter text-zinc-500">
+                  No Artwork
+                </span>
               </div>
             )}
 
-            {isTopTag && (
-              <div
-                className={cn(
-                  "absolute inset-x-0 top-0 z-40 flex h-[22px] items-center justify-center text-[10px] font-black uppercase tracking-[0.15em] text-white shadow-md leading-none ring-1 ring-black/10",
-                  SPECIAL_TAG_COLORS[specialTag],
-                )}
-              >
-                {specialTag}
+            <div
+              className={cn(
+                "absolute left-2 z-20 flex items-center gap-1.5 pointer-events-none transition-all duration-200",
+                isTopTag ? "top-7" : "top-2",
+              )}
+            >
+              {timeBadge && (
+                <div className="rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10">
+                  {timeBadge}
+                </div>
+              )}
+              {statusBadge && (
+                <div
+                  className={cn(
+                    "rounded-sm px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl ring-1 ring-white/10",
+                    SPECIAL_TAG_COLORS[statusBadge] || "bg-zinc-800",
+                  )}
+                >
+                  {statusBadge}
+                </div>
+              )}
+            </div>
+
+            {/* Conditional New Release Badge */}
+            {isNewRelease && (
+              <div className="absolute bottom-2 right-2 z-20 rounded-sm bg-[#9810fa] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl ring-1 ring-white/10">
+                New Episode
               </div>
             )}
 
@@ -167,7 +249,7 @@ export function MediaCard({
               <div
                 className="absolute right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
                 style={{
-                  top: isTopTag ? "22px" : "0",
+                  top: isTopTag ? "20px" : "0",
                   borderTop: "38px solid",
                   borderLeft: "38px solid transparent",
                   borderTopColor: ribbonColor,
@@ -181,37 +263,8 @@ export function MediaCard({
                 </span>
               </div>
             )}
-
-            {badge && (
-              <div
-                className={cn(
-                  "absolute left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10 pointer-events-none transition-all",
-                  isTopTag ? "top-[28px]" : "top-2",
-                )}
-              >
-                {badge}
-              </div>
-            )}
-
-            {bottomBadge && (
-              <div className="absolute bottom-2 left-2 z-20 rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10 pointer-events-none transition-all">
-                {bottomBadge}
-              </div>
-            )}
-
-            {specialTag === "New Episode" && (
-              <div
-                className={cn(
-                  "absolute bottom-2.5 right-2.5 z-40 flex items-center justify-center rounded px-2.5 py-1.5 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(0,0,0,0.5)] ring-1 ring-white/10 leading-none",
-                  SPECIAL_TAG_COLORS[specialTag],
-                )}
-              >
-                {specialTag}
-              </div>
-            )}
           </div>
         </Link>
-
         {airedCount > 0 && (
           <div
             ref={barRef}
@@ -243,7 +296,7 @@ export function MediaCard({
         </div>
       )}
 
-      {!disableHover && showInlineActions && (
+      {(title || subtitle) && (
         <div className="mt-2.5 flex w-full flex-col items-center px-1 pb-1 text-center">
           <Link
             href={href}

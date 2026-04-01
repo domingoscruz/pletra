@@ -31,12 +31,30 @@ export function WatchingToast() {
   const [isClosedManually, setIsClosedManually] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [smoothProgress, setSmoothProgress] = useState(0);
+  const [timeLeft, setTimeLeft] = useState<string>("");
 
   // Rate Limiting & Polling state
   const [backoffMs, setBackoffMs] = useState(0);
   const lastMediaId = useRef<number | null>(null);
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
   const isFetching = useRef(false);
+
+  const formatTimeRemaining = (expiresAt: string) => {
+    const end = new Date(expiresAt).getTime();
+    const now = Date.now();
+    const diff = end - now;
+
+    if (diff <= 0) return "0m left";
+
+    const totalMinutes = Math.floor(diff / 1000 / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m left`;
+    }
+    return `${minutes}m left`;
+  };
 
   const checkWatching = useCallback(async () => {
     if (isFetching.current || isClosedManually || typeof document === "undefined") return;
@@ -50,7 +68,6 @@ export function WatchingToast() {
       });
 
       if (res.status === 429) {
-        console.warn("Trakt API Rate Limited. Increasing backoff...");
         setBackoffMs((prev) => Math.min(prev + 60000, 300000));
         return;
       }
@@ -80,13 +97,21 @@ export function WatchingToast() {
           const tmdbId = isEpisode ? data.show?.ids?.tmdb : data.movie?.ids?.tmdb;
 
           if (tmdbId) {
-            const imgs = await getTmdbImageAction(
+            const mediaImgs = await getTmdbImageAction(
               tmdbId,
               isEpisode ? "tv" : "movie",
               isEpisode ? data.episode?.season : undefined,
               isEpisode ? data.episode?.number : undefined,
             );
-            setImageUrl(imgs?.still || imgs?.backdrop || imgs?.poster || null);
+
+            let finalImage = isEpisode ? mediaImgs?.still : mediaImgs?.backdrop;
+
+            if (isEpisode && !finalImage) {
+              const showImgs = await getTmdbImageAction(tmdbId, "tv");
+              finalImage = showImgs?.backdrop || showImgs?.poster;
+            }
+
+            setImageUrl(finalImage || mediaImgs?.poster || null);
           }
         }
         setScrobble(data);
@@ -142,10 +167,15 @@ export function WatchingToast() {
       const end = new Date(scrobble.expires_at).getTime();
       const totalDuration = end - start;
       const elapsed = now - start;
+
       if (totalDuration > 0) {
         setSmoothProgress(Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)));
       }
+
+      setTimeLeft(formatTimeRemaining(scrobble.expires_at));
     };
+
+    updateProgress();
     const frame = setInterval(updateProgress, 1000);
     return () => clearInterval(frame);
   }, [scrobble]);
@@ -184,14 +214,12 @@ export function WatchingToast() {
   const mainHref = isEpisode ? episodeHref : movieHref;
   const subHref = isEpisode ? (showSlug ? `/shows/${showSlug}` : null) : movieHref;
 
-  // Minimized View
   if (isMinimized) {
     return (
       <button
         onClick={() => setIsMinimized(false)}
         className="fixed bottom-6 right-6 z-[100] flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black shadow-2xl transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-2"
       >
-        {/* FIXED: Single darker pulsing dot */}
         <div className="absolute top-0 right-0 z-10 flex h-3 w-3 items-center justify-center">
           <span className="animate-pulse rounded-full bg-red-800 h-2.5 w-2.5 shadow-[0_0_8px_rgba(153,27,27,0.8)]"></span>
         </div>
@@ -204,7 +232,6 @@ export function WatchingToast() {
     );
   }
 
-  // Full Toast View
   return (
     <div className="fixed bottom-6 right-6 z-[100] w-[380px] select-none overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_20px_50px_rgba(0,0,0,1)] animate-in fade-in slide-in-from-bottom-4 duration-300">
       {showCancelConfirm && (
@@ -233,7 +260,6 @@ export function WatchingToast() {
       <div className="relative flex flex-col gap-4 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {/* FIXED: Single darker pulsing dot in header */}
             <div className="relative flex h-2 w-2 items-center justify-center">
               <span className="animate-pulse rounded-full bg-red-800 h-2 w-2"></span>
             </div>
@@ -310,11 +336,16 @@ export function WatchingToast() {
 
         <div className="flex flex-col gap-1.5">
           <div className="flex justify-between items-end px-0.5">
-            <span className="text-[7px] font-black text-zinc-700 uppercase tracking-widest">
-              Progress
-            </span>
-            <span className="text-[9px] font-black text-red-500 tabular-nums">
-              {Math.round(smoothProgress)}%
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">
+                Progress
+              </span>
+              <span className="text-[9px] font-black text-red-500 tabular-nums">
+                {Math.round(smoothProgress)}%
+              </span>
+            </div>
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight tabular-nums">
+              {timeLeft}
             </span>
           </div>
           <div className="relative h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden ring-1 ring-white/5">

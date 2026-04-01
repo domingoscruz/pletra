@@ -5,87 +5,80 @@ import { auth } from "@/lib/auth";
 import { createTraktClient, type TraktClient } from "./trakt";
 
 /**
- * Resolve the Trakt access token once per request, eagerly, before any
- * streaming begins. Wrapped in React.cache so every Server Component that
- * calls this shares the same promise within a single request — headers() is
- * only called once, and it's called synchronously at the top of the first
- * component that needs it, not lazily inside the stream.
- *
- * This works around a vinext bug where clearRequestContext() (which sets
- * headersContext to null) is called immediately after the RSC/SSR streams
- * are constructed, before the streams are actually consumed. On warm
- * subsequent requests the stream is consumed after cleanup, causing
- * headers() to throw "can only be called from a Server Component".
+ * Resolve the Trakt access token once per request.
+ * Wrapped in React.cache to ensure that every Server Component sharing
+ * the same request uses the same promise.
  */
 const getAccessToken = cache(async (): Promise<string | null> => {
-	const h = await headers();
+  const requestHeaders = await headers();
 
-	const session = await auth.api.getSession({ headers: h });
-	if (!session) return null;
+  const session = await auth.api.getSession({ headers: requestHeaders });
+  if (!session) return null;
 
-	const tokenRes = await auth.api.getAccessToken({
-		headers: h,
-		body: { providerId: "trakt" },
-	});
+  const tokenResponse = await auth.api.getAccessToken({
+    headers: requestHeaders,
+    body: { providerId: "trakt" },
+  });
 
-	return tokenRes?.accessToken ?? null;
+  return tokenResponse?.accessToken ?? null;
 });
 
 /**
  * Returns an authenticated Trakt client for the current request.
- * Redirects to /auth/login if there is no valid session, so callers
- * never need to handle the unauthenticated case themselves.
+ * Automatically redirects to the login page if no valid session is found.
  */
 export async function getAuthenticatedTraktClient(): Promise<TraktClient> {
-	const accessToken = await getAccessToken();
+  const accessToken = await getAccessToken();
 
-	if (!accessToken) {
-		redirect("/auth/login");
-	}
+  if (!accessToken) {
+    redirect("/auth/login");
+  }
 
-	return createTraktClient(accessToken);
+  return createTraktClient(accessToken);
 }
 
 /**
- * Returns an authenticated Trakt client if a session exists, or an
- * unauthenticated client that can only access public endpoints.
- * Use this on pages that are partially personalised — the page itself
- * renders for everyone but auth-only data is simply omitted.
+ * Returns an authenticated Trakt client if a session exists,
+ * or an unauthenticated client for public endpoints.
  */
 export async function getOptionalTraktClient(): Promise<TraktClient> {
-	const accessToken = await getAccessToken();
-	return createTraktClient(accessToken ?? undefined);
+  const accessToken = await getAccessToken();
+  return createTraktClient(accessToken ?? undefined);
 }
 
 /**
- * Returns identifiers for the current authenticated user, or null if not logged in.
- * Includes both the username (used in profile URLs) and the Trakt slug (session id).
+ * Returns identifiers for the current authenticated user.
+ * Includes the username and the Trakt slug.
  */
 export const getCurrentUser = cache(
-	async (): Promise<{ username: string; slug: string } | null> => {
-		try {
-			const h = await headers();
-			const session = await auth.api.getSession({ headers: h });
-			if (!session?.user) return null;
+  async (): Promise<{ username: string; slug: string } | null> => {
+    try {
+      const requestHeaders = await headers();
+      const session = await auth.api.getSession({ headers: requestHeaders });
+      if (!session?.user) return null;
 
-			const email = session.user.email ?? "";
-			const username = email.endsWith("@trakt.tv") ? email.replace(/@trakt\.tv$/, "") : "";
-			const slug = session.user.id ?? "";
+      const email = session.user.email ?? "";
+      const username = email.endsWith("@trakt.tv") ? email.replace(/@trakt\.tv$/, "") : "";
+      const slug = session.user.id ?? "";
 
-			if (!username && !slug) return null;
-			return { username: username || slug, slug: slug || username };
-		} catch {
-			return null;
-		}
-	},
+      if (!username && !slug) return null;
+      return {
+        username: username || slug,
+        slug: slug || username,
+      };
+    } catch {
+      return null;
+    }
+  },
 );
 
 /**
- * Check if a profile slug belongs to the current user.
+ * Checks if a given profile slug belongs to the currently authenticated user.
  */
 export async function isCurrentUser(profileSlug: string): Promise<boolean> {
-	const user = await getCurrentUser();
-	if (!user) return false;
-	const lower = profileSlug.toLowerCase();
-	return user.username.toLowerCase() === lower || user.slug.toLowerCase() === lower;
+  const user = await getCurrentUser();
+  if (!user) return false;
+
+  const lowerSlug = profileSlug.toLowerCase();
+  return user.username.toLowerCase() === lowerSlug || user.slug.toLowerCase() === lowerSlug;
 }

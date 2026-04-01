@@ -4,19 +4,32 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { StartWatchingFilter } from "./start-watching-filter";
 
-// Fetch episode title with cache to prevent redundant API calls
-const getEpisodeTitle = cache(async (client: any, showId: number) => {
+// Fetch episode metadata with cache to prevent redundant API calls
+const getEpisodeMetadata = cache(async (client: any, showId: string | number) => {
   try {
     const res = await client.shows.episode.summary({
       params: { id: showId, season: 1, episode: 1 },
+      query: { extended: "full" },
     });
-    return res && res.status === 200 ? res.body.title : null;
+
+    if (res && res.status === 200) {
+      return {
+        title: res.body.title,
+        first_aired: res.body.first_aired,
+        ids: res.body.ids,
+      };
+    }
+    return null;
   } catch (error) {
-    console.error("Error fetching episode title:", error);
+    console.error("Error fetching episode metadata:", error);
     return null;
   }
 });
 
+/**
+ * StartWatching component responsible for fetching watchlist items
+ * and presenting the next available episode or movie for the user.
+ */
 export async function StartWatching() {
   const client = await getAuthenticatedTraktClient();
 
@@ -33,7 +46,7 @@ export async function StartWatching() {
             params: { id: "me", sort: "released" },
             query: {
               page: 1,
-              limit: 20, // Increased slightly to fill grids better on ultra-wide
+              limit: 20,
               sort_how: "desc",
               hide: "unreleased",
               extended: "full",
@@ -100,10 +113,10 @@ export async function StartWatching() {
       (item) => item.movie?.ids?.trakt && !inProgressMovieIds.has(item.movie.ids.trakt),
     );
 
-    // Optimized batch fetching for images and titles
-    const [firstEpisodesTitles, showImages, movieImages] = await Promise.all([
+    // Optimized batch fetching for metadata and images
+    const [firstEpisodesMeta, showImages, movieImages] = await Promise.all([
       Promise.all(
-        (showWatchlist as any[]).map((item) => getEpisodeTitle(client, item.show.ids.trakt)),
+        (showWatchlist as any[]).map((item) => getEpisodeMetadata(client, item.show.ids.trakt)),
       ),
       Promise.all(
         (showWatchlist as any[]).map((item) => fetchTmdbImages(item.show?.ids?.tmdb, "tv")),
@@ -112,7 +125,10 @@ export async function StartWatching() {
     ]);
 
     const showItems = (showWatchlist as any[]).map((item, i) => {
-      const epTitle = firstEpisodesTitles[i] ? `: ${firstEpisodesTitles[i]}` : "";
+      const epMeta = firstEpisodesMeta[i];
+      // Removed the colon between the episode number and the title
+      const epTitle = epMeta?.title ? ` ${epMeta.title}` : "";
+
       return {
         title: item.show?.title ?? "Unknown",
         subtitle: `1x01${epTitle}`,
@@ -124,6 +140,8 @@ export async function StartWatching() {
         userRating: showRatingMap.get(item.show?.ids?.trakt),
         mediaType: "shows" as const,
         ids: item.show?.ids ?? {},
+        episodeIds: epMeta?.ids ?? {}, // Required for CardActions on episodes
+        releasedAt: epMeta?.first_aired ?? item.show?.first_aired ?? null, // Fallback to show date
         airDate: item.show?.first_aired ? new Date(item.show.first_aired).getTime() : 0,
       };
     });
@@ -140,6 +158,7 @@ export async function StartWatching() {
       userRating: movieRatingMap.get(item.movie?.ids?.trakt),
       mediaType: "movies" as const,
       ids: item.movie?.ids ?? {},
+      releasedAt: item.movie?.released ?? null,
       airDate: item.movie?.released ? new Date(item.movie.released).getTime() : 0,
     }));
 

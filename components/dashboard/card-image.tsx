@@ -29,7 +29,7 @@ export function CardImage({
         fill
         priority={priority}
         // When priority is true, we don't use lazy loading
-        loading={priority ? undefined : "lazy"}
+        loading={priority ? undefined : "eager"}
         className={`object-cover ${disableHover ? "" : "transition-transform duration-300 group-hover:scale-105"} ${loaded ? "opacity-100" : "opacity-0"}`}
         sizes={sizes}
         onLoad={() => setLoaded(true)}

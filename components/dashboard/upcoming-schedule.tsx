@@ -4,6 +4,10 @@ import { formatRuntime } from "@/lib/format";
 import { CardGrid } from "./card-grid";
 import { MediaCard } from "./media-card";
 
+/**
+ * UpcomingSchedule component displays future episodes and movies
+ * from the user's personal calendar.
+ */
 export async function UpcomingSchedule() {
   const client = await getAuthenticatedTraktClient();
   const now = new Date();
@@ -26,6 +30,7 @@ export async function UpcomingSchedule() {
 
     const items: any[] = [];
 
+    // Process Shows
     for (const entry of calShows) {
       const show = entry.show;
       const ep = entry.episode;
@@ -34,12 +39,12 @@ export async function UpcomingSchedule() {
       const airTimeDate = new Date(entry.first_aired);
       if (airTimeDate.getTime() < now.getTime()) continue;
 
-      const imgs = await fetchTmdbImages(show.ids?.tmdb, "tv");
+      const imgs = await fetchTmdbImages(show.ids?.tmdb, "tv").catch(() => null);
       const epLabel = `${ep.season}x${String(ep.number).padStart(2, "0")}`;
 
-      let specialTag: any = null;
+      let statusBadge: string | undefined = undefined;
       if (ep.number === 1) {
-        specialTag = ep.season === 1 ? "Series Premiere" : "Season Premiere";
+        statusBadge = ep.season === 1 ? "Series Premiere" : "Season Premiere";
       }
 
       items.push({
@@ -53,18 +58,20 @@ export async function UpcomingSchedule() {
         ids: show.ids ?? {},
         episodeIds: ep.ids ?? {},
         airTime: airTimeDate.getTime(),
-        first_aired: entry.first_aired,
-        specialTag,
+        releasedAt: entry.first_aired, // Release Date Logic for CardActions
+        statusBadge,
+        specialTag: undefined,
       });
     }
 
+    // Process Movies
     for (const entry of calMovies) {
       const movie = entry.movie;
       if (!movie) continue;
       const releaseDate = new Date(entry.released);
       if (releaseDate.getTime() < now.getTime()) continue;
 
-      const imgs = await fetchTmdbImages(movie.ids?.tmdb, "movie");
+      const imgs = await fetchTmdbImages(movie.ids?.tmdb, "movie").catch(() => null);
       items.push({
         title: movie.title ?? "Unknown",
         subtitle: [movie.year, movie.runtime && formatRuntime(movie.runtime)]
@@ -76,13 +83,16 @@ export async function UpcomingSchedule() {
         mediaType: "movies" as const,
         ids: movie.ids ?? {},
         airTime: releaseDate.getTime(),
-        first_aired: entry.released,
+        releasedAt: entry.released, // Release Date Logic for CardActions
       });
     }
 
     items.sort((a, b) => a.airTime - b.airTime);
     if (items.length === 0) return null;
 
+    /**
+     * Formats the relative time or absolute date for the schedule badge.
+     */
     const formatScheduleBadge = (dateStr: string) => {
       const airDate = new Date(dateStr);
       const diffMs = airDate.getTime() - now.getTime();
@@ -110,9 +120,9 @@ export async function UpcomingSchedule() {
       >
         {items.map((item, i) => (
           <MediaCard
-            key={`upcoming-${i}`}
+            key={`upcoming-${item.ids.trakt}-${i}`}
             {...item}
-            bottomBadge={formatScheduleBadge(item.first_aired)}
+            timeBadge={formatScheduleBadge(item.releasedAt)}
             isWatched={false}
             showInlineActions={true}
             variant="landscape"
