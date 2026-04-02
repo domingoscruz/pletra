@@ -1,28 +1,92 @@
-/**
- * @file trakt-client.ts
- * @description Factory for the Trakt API client with specialized fetch wrapper.
- * This implementation ensures SSR compatibility by accepting an optional accessToken
- * and enforcing mandatory Trakt headers.
- */
-
 import { traktApi, Environment } from "@trakt/api";
+import { cookies } from "next/headers";
 
-/**
- * Type definition for the Trakt Client instance.
- */
 export type TraktClient = ReturnType<typeof traktApi>;
+
+interface TraktTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  refresh_token: string;
+  scope: string;
+  created_at: number;
+}
+
+async function refreshTraktToken(refreshToken: string): Promise<string | null> {
+  const clientId = process.env.TRAKT_CLIENT_ID;
+  const clientSecret = process.env.TRAKT_CLIENT_SECRET;
+  const redirectUri = process.env.NEXT_PUBLIC_TRAKT_REDIRECT_URI;
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    console.error("[Trakt Auth] Critical: Missing OAuth environment variables for token refresh.");
+    return null;
+  }
+
+  try {
+    const response = await fetch("https://api.trakt.tv/oauth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "refresh_token",
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`[Trakt Auth] Refresh request failed. Status: ${response.status}`);
+      return null;
+    }
+
+    const data = (await response.json()) as TraktTokenResponse;
+
+    // In Next.js 15+, cookies() is asynchronous and must be awaited.
+    const cookieStore = await cookies();
+
+    try {
+      // Note: .set() only works in Server Actions or Route Handlers.
+      // In Server Components, this will throw/warn as cookies are Read-only.
+      cookieStore.set("trakt_access_token", data.access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: data.expires_in,
+      });
+
+      cookieStore.set("trakt_refresh_token", data.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 90,
+      });
+    } catch (cookieError) {
+      console.warn(
+        "[Trakt Auth] Cookie storage skipped. Likely in a Read-only Server Component context.",
+      );
+    }
+
+    return data.access_token;
+  } catch (error) {
+    console.error("[Trakt Auth] Exception thrown during token refresh:", error);
+    return null;
+  }
+}
 
 /**
  * Creates a configured Trakt API client.
  *
- * @param accessToken - Optional OAuth2 token. If provided, requests will be authenticated.
- * @returns A Trakt client instance with custom fetch logic.
- *
- * @example
- * const client = createTraktClient(session.accessToken);
- * const schedule = await client.calendars.my.shows({ start_date: '2026-04-02', days: 30 });
+ * @param providedAccessToken - Optional OAuth2 access token.
+ * @param providedRefreshToken - Optional OAuth2 refresh token.
+ * @returns A Trakt client instance with custom fetch and interceptor logic.
  */
-export function createTraktClient(accessToken?: string): TraktClient {
+export function createTraktClient(
+  providedAccessToken?: string,
+  providedRefreshToken?: string,
+): TraktClient {
   const clientId = process.env.TRAKT_CLIENT_ID;
 
   if (!clientId) {
@@ -35,45 +99,61 @@ export function createTraktClient(accessToken?: string): TraktClient {
     environment: Environment.production,
     apiKey: clientId || "",
     fetch: async (url, init) => {
-      const headers = new Headers(init?.headers);
+      // Resolve tokens dynamically inside the async fetch call to handle async cookies
+      const cookieStore = await cookies();
+      let accessToken = providedAccessToken || cookieStore.get("trakt_access_token")?.value;
+      const refreshToken = providedRefreshToken || cookieStore.get("trakt_refresh_token")?.value;
 
-      // 1. Set mandatory Trakt API version
-      headers.set("trakt-api-version", "2");
+      const buildHeaders = (token?: string) => {
+        const headers = new Headers(init?.headers);
+        headers.set("trakt-api-version", "2");
 
-      // 2. Set the API Key (Client ID)
-      if (clientId) {
-        headers.set("trakt-api-key", clientId);
-      }
+        if (clientId) {
+          headers.set("trakt-api-key", clientId);
+        }
 
-      // 3. Set Authorization header if token is available (prevents 401)
-      if (accessToken) {
-        headers.set("Authorization", `Bearer ${accessToken}`);
-      }
+        if (token) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
 
-      // 4. Identify the app to Trakt
-      headers.set("user-agent", "pletra/1.0");
+        headers.set("user-agent", "pletra/1.0");
+        return headers;
+      };
 
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         ...init,
-        headers,
-        // Using 'no-store' ensures the server fetches fresh data on every request
+        headers: buildHeaders(accessToken),
         cache: "no-store",
       });
 
-      // Handle common Trakt API errors with clear logs
+      // Intercept 401 Unauthorized and attempt silent refresh
+      if (response.status === 401 && refreshToken) {
+        console.log(`[Trakt API] Token expired for ${url}. Attempting refresh...`);
+
+        const newAccessToken = await refreshTraktToken(refreshToken);
+
+        if (newAccessToken) {
+          // Retry the request with the new token
+          response = await fetch(url, {
+            ...init,
+            headers: buildHeaders(newAccessToken),
+            cache: "no-store",
+          });
+        }
+      }
+
       if (!response.ok) {
         const errorText = await response.text();
-
         console.error(
           `[Trakt API Error] URL: ${url} | Status: ${response.status} | Response: ${errorText}`,
         );
 
         if (response.status === 403) {
-          throw new Error("TRAKT_FORBIDDEN: Verify API Key or permissions for this resource.");
+          throw new Error("TRAKT_FORBIDDEN: Verify API Key or permissions.");
         }
 
         if (response.status === 401) {
-          throw new Error("TRAKT_UNAUTHORIZED: Access token is missing or expired.");
+          throw new Error("TRAKT_UNAUTHORIZED: Token expired and refresh failed.");
         }
 
         throw new Error(`Trakt request failed [${response.status}]: ${errorText}`);
