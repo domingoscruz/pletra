@@ -1,15 +1,28 @@
+/**
+ * @file trakt-client.ts
+ * @description Factory for the Trakt API client with specialized fetch wrapper.
+ * This implementation ensures SSR compatibility by accepting an optional accessToken
+ * and enforcing mandatory Trakt headers.
+ */
+
 import { traktApi, Environment } from "@trakt/api";
 
+/**
+ * Type definition for the Trakt Client instance.
+ */
 export type TraktClient = ReturnType<typeof traktApi>;
 
 /**
- * Creates a Trakt client with a custom fetch wrapper.
- * * FIXES:
- * 1. Explicitly sets 'trakt-api-version: 2' to prevent 403/404 errors.
- * 2. Ensures 'trakt-api-key' is present in headers for server-side requests.
- * 3. Improves error logging for Vercel/production environments.
+ * Creates a configured Trakt API client.
+ *
+ * @param accessToken - Optional OAuth2 token. If provided, requests will be authenticated.
+ * @returns A Trakt client instance with custom fetch logic.
+ *
+ * @example
+ * const client = createTraktClient(session.accessToken);
+ * const schedule = await client.calendars.my.shows({ start_date: '2026-04-02', days: 30 });
  */
-export function createTraktClient(accessToken?: string) {
+export function createTraktClient(accessToken?: string): TraktClient {
   const clientId = process.env.TRAKT_CLIENT_ID;
 
   if (!clientId) {
@@ -20,48 +33,50 @@ export function createTraktClient(accessToken?: string) {
 
   return traktApi({
     environment: Environment.production,
-    apiKey: clientId!,
+    apiKey: clientId || "",
     fetch: async (url, init) => {
       const headers = new Headers(init?.headers);
 
-      // Mandatory Trakt API headers
+      // 1. Set mandatory Trakt API version
       headers.set("trakt-api-version", "2");
 
+      // 2. Set the API Key (Client ID)
       if (clientId) {
         headers.set("trakt-api-key", clientId);
       }
 
+      // 3. Set Authorization header if token is available (prevents 401)
       if (accessToken) {
         headers.set("Authorization", `Bearer ${accessToken}`);
       }
 
+      // 4. Identify the app to Trakt
       headers.set("user-agent", "pletra/1.0");
 
       const response = await fetch(url, {
         ...init,
         headers,
-        cache: "no-store", // Prevents stale data in Next.js/Vercel
+        // Using 'no-store' ensures the server fetches fresh data on every request
+        cache: "no-store",
       });
 
+      // Handle common Trakt API errors with clear logs
       if (!response.ok) {
-        const text = await response.text();
+        const errorText = await response.text();
 
-        // Log detailed error context for Vercel logs
         console.error(
-          `[Trakt API Error] URL: ${url} | Status: ${response.status} | Response: ${text}`,
+          `[Trakt API Error] URL: ${url} | Status: ${response.status} | Response: ${errorText}`,
         );
 
         if (response.status === 403) {
-          throw new Error(
-            "TRAKT_FORBIDDEN: Verify API Key or ensure you have permission for this resource.",
-          );
+          throw new Error("TRAKT_FORBIDDEN: Verify API Key or permissions for this resource.");
         }
 
         if (response.status === 401) {
-          throw new Error("TRAKT_UNAUTHORIZED");
+          throw new Error("TRAKT_UNAUTHORIZED: Access token is missing or expired.");
         }
 
-        throw new Error(`Trakt request failed with status ${response.status}: ${text}`);
+        throw new Error(`Trakt request failed [${response.status}]: ${errorText}`);
       }
 
       return response;
