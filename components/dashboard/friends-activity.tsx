@@ -7,14 +7,9 @@ import { CardGrid } from "./card-grid";
 import { MediaCard } from "./media-card";
 import { unstable_cache } from "next/cache";
 
-type SpecialTag =
-  | "Series Premiere"
-  | "Season Premiere"
-  | "Season Finale"
-  | "Series Finale"
-  | "New Episode"
-  | undefined;
-
+/**
+ * Interfaces for Trakt Data Structures
+ */
 export interface FollowingUser {
   followed_at?: string;
   user?: {
@@ -51,7 +46,79 @@ export interface HistoryItem {
 }
 
 /**
- * Fetches user-specific metadata including watched history and ratings.
+ * Minimal metadata structure to stay under Next.js 2MB cache limit.
+ */
+interface ThinnedEpisodeMetadata {
+  firstAired: string;
+  rating: number;
+}
+
+/**
+ * Optimization: Cached fetch for individual friend history.
+ */
+const getCachedFriendHistory = (username: string) =>
+  unstable_cache(
+    async () => {
+      const client = await getAuthenticatedTraktClient();
+      if (!client) return [];
+      try {
+        const res = await client.users.history.all({
+          params: { id: username },
+          query: { page: 1, limit: 10, extended: "full" },
+        });
+        return res.status === 200 ? (res.body as HistoryItem[]) : [];
+      } catch (error) {
+        console.error(`[Pletra] Error fetching history for ${username}:`, error);
+        return [];
+      }
+    },
+    [`friend-history-v2-${username}`],
+    { revalidate: 300, tags: [`history-${username}`] },
+  )();
+
+/**
+ * Optimization: Thinned metadata caching.
+ * Instead of storing the whole Trakt Season/Episode object (which causes the 2MB error),
+ * we only store a map of TraktID -> { firstAired, rating }.
+ */
+const getCachedThinnedShowMetadata = (slug: string) =>
+  unstable_cache(
+    async () => {
+      const client = await getAuthenticatedTraktClient();
+      if (!client) return {};
+      try {
+        const res = await client.shows.seasons({
+          params: { id: slug },
+          query: { extended: "episodes" } as any,
+        });
+
+        if (res.status !== 200 || !Array.isArray(res.body)) return {};
+
+        const thinnedMap: Record<number, ThinnedEpisodeMetadata> = {};
+
+        // Extract only the essential data to minimize cache size
+        res.body.forEach((season: any) => {
+          season.episodes?.forEach((ep: any) => {
+            if (ep.ids?.trakt) {
+              thinnedMap[ep.ids.trakt] = {
+                firstAired: ep.first_aired || "",
+                rating: ep.rating || 0,
+              };
+            }
+          });
+        });
+
+        return thinnedMap;
+      } catch {
+        return {};
+      }
+    },
+    [`show-metadata-thinned-${slug}`],
+    { revalidate: 3600, tags: [`show-metadata-${slug}`] },
+  )();
+
+/**
+ * Fetches authenticated user metadata for sync purposes (watch status/ratings).
  */
 async function fetchUserMetadata() {
   const client = await getAuthenticatedTraktClient();
@@ -121,77 +188,52 @@ export async function FriendsActivity() {
 
   if (followingRes.status !== 200) return null;
 
+  const FRIENDS_LIMIT = 50;
+  const ITEMS_PER_PAGE = 10;
+  const TOTAL_PAGES = 5;
+  const TOTAL_ITEMS_LIMIT = ITEMS_PER_PAGE * TOTAL_PAGES;
+
   const following = (followingRes.body as FollowingUser[])
     .filter((f) => f.user && !f.user.private)
-    .slice(0, 10);
+    .slice(0, FRIENDS_LIMIT);
 
   if (following.length === 0) return null;
 
+  // Parallel fetch using granular caches to avoid Trakt 429 errors
   const userActivities = await Promise.all(
-    following.map(async (f) => {
-      const username = f.user!.ids?.slug ?? f.user!.username!;
-      try {
-        const [showsRes, moviesRes] = await Promise.all([
-          client.users.history.shows({
-            params: { id: username },
-            query: { page: 1, limit: 5, extended: "full" },
-          }),
-          client.users.history.movies({
-            params: { id: username },
-            query: { page: 1, limit: 5, extended: "full" },
-          }),
-        ]);
-        return [
-          ...(showsRes.status === 200 ? (showsRes.body as HistoryItem[]) : []),
-          ...(moviesRes.status === 200 ? (moviesRes.body as HistoryItem[]) : []),
-        ].map((h) => ({ ...h, _user: f.user! }));
-      } catch {
-        return [];
-      }
+    following.map(async (friend) => {
+      const username = friend.user!.ids?.slug ?? friend.user!.username!;
+      const history = await getCachedFriendHistory(username);
+      return history.map((item) => ({ ...item, _user: friend.user! }));
     }),
   );
 
-  const activities = userActivities
+  const sortedActivities = userActivities
     .flat()
     .sort((a, b) => new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime())
-    .slice(0, 20);
+    .slice(0, TOTAL_ITEMS_LIMIT);
 
-  if (activities.length === 0) return null;
+  if (sortedActivities.length === 0) return null;
 
   const uniqueShowSlugs = Array.from(
-    new Set(activities.map((a) => a.show?.ids?.slug).filter(Boolean)),
-  );
-  const seasonsData = await Promise.all(
-    uniqueShowSlugs.map((slug) =>
-      client.shows
-        .seasons({ params: { id: slug as string }, query: { extended: "full,episodes" } as any })
-        .catch(() => null),
-    ),
+    new Set(sortedActivities.map((a) => a.show?.ids?.slug).filter(Boolean)),
   );
 
-  /**
-   * Enhanced metadata map to store both release date AND community rating
-   * since history items often lack the rating field for episodes.
-   */
-  const episodeMetadataMap = new Map<number, { firstAired: string; rating: number }>();
+  // Fetching thinned maps to resolve the 2MB cache error
+  const seasonsMetadataResults = await Promise.all(
+    uniqueShowSlugs.map((slug) => getCachedThinnedShowMetadata(slug as string)),
+  );
 
-  seasonsData.forEach((res) => {
-    if (res?.status === 200 && Array.isArray(res.body)) {
-      res.body.forEach((season: any) => {
-        season.episodes?.forEach((ep: any) => {
-          if (ep.ids?.trakt) {
-            episodeMetadataMap.set(ep.ids.trakt, {
-              firstAired: ep.first_aired,
-              rating: ep.rating || 0,
-            });
-          }
-        });
-      });
-    }
+  // Merge all thinned maps into a single lookup table
+  const episodeMetadataMap = new Map<number, ThinnedEpisodeMetadata>();
+  seasonsMetadataResults.forEach((map) => {
+    Object.entries(map).forEach(([traktId, data]) => {
+      episodeMetadataMap.set(Number(traktId), data);
+    });
   });
 
   const items = await Promise.all(
-    activities.map(async (activity) => {
+    sortedActivities.map(async (activity) => {
       const isEpisode = !!activity.show;
       const tmdbId = isEpisode ? activity.show?.ids?.tmdb : activity.movie?.ids?.tmdb;
 
@@ -214,13 +256,10 @@ export async function FriendsActivity() {
       let finalImageUrl: string | null = null;
       if (tmdbId) {
         const [epImgs, showImgs, movieImgs] = await Promise.all([
-          isEpisode
-            ? fetchTmdbImages(
-                tmdbId,
-                "tv",
-                activity.episode?.season,
-                activity.episode?.number,
-              ).catch(() => null)
+          isEpisode && activity.episode
+            ? fetchTmdbImages(tmdbId, "tv", activity.episode.season, activity.episode.number).catch(
+                () => null,
+              )
             : null,
           isEpisode ? fetchTmdbImages(tmdbId, "tv").catch(() => null) : null,
           !isEpisode ? fetchTmdbImages(tmdbId, "movie").catch(() => null) : null,
@@ -246,7 +285,6 @@ export async function FriendsActivity() {
         ? `${epLabel} ${activity.episode?.title || ""}`
         : String(activity.movie?.year || "");
 
-      // Get community metadata from our map for episodes
       const epMetadata =
         isEpisode && activity.episode?.ids?.trakt
           ? episodeMetadataMap.get(activity.episode.ids.trakt)
@@ -254,10 +292,7 @@ export async function FriendsActivity() {
       const releasedAt = isEpisode
         ? epMetadata?.firstAired || activity.episode?.first_aired
         : activity.movie?.released;
-
-      // Ensure global rating is calculated from the reliable metadata source for episodes
       const communityRating = isEpisode ? epMetadata?.rating || 0 : activity.movie?.rating || 0;
-      const globalRating = Math.round(communityRating * 10);
 
       return {
         title,
@@ -274,8 +309,7 @@ export async function FriendsActivity() {
         watched_at: activity.watched_at,
         isWatched,
         userRating,
-        globalRating,
-        communityRating, // Passing the 0-10 scale rating for MediaCard prop
+        communityRating,
         friend: {
           avatarUrl: proxyImageUrl(activity._user?.images?.avatar?.full),
           username: activity._user?.name || activity._user?.username || "Someone",
@@ -355,7 +389,7 @@ export async function FriendsActivity() {
                 >
                   {item.friend.username}
                 </Link>
-                <span className="ml-1">has watched</span>
+                <span className="ml-1">watched</span>
               </p>
               <Link
                 href={item.href}
