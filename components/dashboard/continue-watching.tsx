@@ -55,8 +55,10 @@ interface MovieProgressItem {
 }
 
 /**
- * ContinueWatching component fetches the user's current progress for shows (Up Next)
- * and movies in progress, then displays them in a grid.
+ * ContinueWatching component.
+ *
+ * Logic Update: Ensures that if a 'next_episode' exists, the 'aired' count
+ * is always strictly greater than 'completed', preventing a premature 100% progress state.
  */
 export async function ContinueWatching() {
   const client = await getAuthenticatedTraktClient();
@@ -186,10 +188,17 @@ export async function ContinueWatching() {
     const nextEp = item.progress?.next_episode;
     if (!nextEp) return;
 
-    const officialAired = exactAiredMap.get(item.show.ids.slug) || item.progress.aired || 1;
-    let specialTag: string | undefined = undefined;
+    // TECHNICAL FIX:
+    // We calculate the number of aired episodes.
+    // To solve the "99% vs 100%" rounding issue on long series:
+    // If a next_episode exists, it means the show is NOT finished.
+    // We ensure that finalAiredCount is at least completed + 1.
+    const calculatedAired = exactAiredMap.get(item.show.ids.slug) || item.progress.aired || 0;
+    const finalAiredCount = Math.max(calculatedAired, item.progress.completed + 1);
 
+    let specialTag: string | undefined = undefined;
     const epType = nextEp.episode_type;
+
     if (
       epType &&
       ["series_finale", "series_premiere", "season_finale", "season_premiere"].includes(epType)
@@ -223,7 +232,10 @@ export async function ContinueWatching() {
       ids: item.show.ids,
       episodeIds: nextEp.ids,
       releasedAt: nextEp.first_aired ?? undefined,
-      progress: { aired: officialAired, completed: item.progress.completed },
+      progress: {
+        aired: finalAiredCount,
+        completed: item.progress.completed,
+      },
       lastWatchedAt: new Date(item.progress.last_watched_at).getTime(),
     });
   });
@@ -249,10 +261,8 @@ export async function ContinueWatching() {
     });
   });
 
-  // Sort by the most recently watched items
   items.sort((a, b) => b.lastWatchedAt - a.lastWatchedAt);
 
-  // Limit to 30 items
   const limitedItems = items.slice(0, 30);
 
   if (limitedItems.length === 0) {
@@ -267,7 +277,7 @@ export async function ContinueWatching() {
           {...item}
           variant="poster"
           showInlineActions
-          showNewBadge={true} // Enabled only for the Continue Watching section
+          showNewBadge={true}
         />
       ))}
     </CardGrid>

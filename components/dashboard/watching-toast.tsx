@@ -7,19 +7,35 @@ import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { getTmdbImageAction } from "@/app/actions/tmdb";
 
+interface TraktIds {
+  trakt: number;
+  slug: string;
+  tmdb?: number;
+}
+
 interface TraktWatchingResponse {
   type: "episode" | "movie";
   progress: number;
   started_at: string;
   expires_at: string;
-  show?: { title: string; ids: { trakt: number; tmdb: number; slug: string } };
+  show?: {
+    title: string;
+    ids: TraktIds;
+    images?: Record<string, any> | null;
+  };
   episode?: {
     season: number;
     number: number;
     title: string;
     ids: { trakt: number; tmdb?: number };
+    images?: Record<string, any> | null;
   };
-  movie?: { title: string; year: number; ids: { trakt: number; tmdb: number; slug: string } };
+  movie?: {
+    title: string;
+    year: number;
+    ids: TraktIds;
+    images?: Record<string, any> | null;
+  };
 }
 
 export function WatchingToast() {
@@ -33,27 +49,39 @@ export function WatchingToast() {
   const [smoothProgress, setSmoothProgress] = useState(0);
   const [timeLeft, setTimeLeft] = useState<string>("");
 
-  // Rate Limiting & Polling state
   const [backoffMs, setBackoffMs] = useState(0);
   const lastMediaId = useRef<number | null>(null);
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
   const isFetching = useRef(false);
 
-  const formatTimeRemaining = (expiresAt: string) => {
-    const end = new Date(expiresAt).getTime();
-    const now = Date.now();
-    const diff = end - now;
+  /**
+   * Universal extractor for Trakt's image format.
+   * Specifically targets screenshot/thumb for episodes.
+   */
+  const extractTraktImage = (
+    obj: any,
+    types: ("screenshot" | "thumb" | "fanart" | "poster")[],
+  ): string | null => {
+    if (!obj || !obj.images) return null;
 
-    if (diff <= 0) return "0m left";
+    for (const type of types) {
+      const target = obj.images[type];
+      let rawUrl: string | null = null;
 
-    const totalMinutes = Math.floor(diff / 1000 / 60);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
+      if (Array.isArray(target) && target.length > 0) {
+        rawUrl = target[0];
+      } else if (typeof target === "string") {
+        rawUrl = target;
+      } else if (target && typeof target === "object") {
+        rawUrl = target.medium || target.full || target.thumb || null;
+      }
 
-    if (hours > 0) {
-      return `${hours}h ${minutes}m left`;
+      if (rawUrl) {
+        return rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+      }
     }
-    return `${minutes}m left`;
+
+    return null;
   };
 
   const checkWatching = useCallback(async () => {
@@ -62,7 +90,7 @@ export function WatchingToast() {
     isFetching.current = true;
 
     try {
-      const res = await fetch("/api/trakt/users/me/watching?extended=full", {
+      const res = await fetch("/api/trakt/users/me/watching?extended=full,images", {
         cache: "no-store",
         headers: { "X-Poll-Request": "true" },
       });
@@ -77,17 +105,12 @@ export function WatchingToast() {
         setScrobble(null);
         setImageUrl(null);
         lastMediaId.current = null;
-        setBackoffMs(0);
         return;
       }
 
-      const text = await res.text();
-      if (!text || text.trim().startsWith("<")) return;
-
-      const data = JSON.parse(text) as TraktWatchingResponse;
+      const data = (await res.json()) as TraktWatchingResponse;
 
       if (data && data.type) {
-        setBackoffMs(0);
         const currentId =
           data.type === "episode" ? data.episode?.ids?.trakt : data.movie?.ids?.trakt;
 
@@ -96,29 +119,54 @@ export function WatchingToast() {
           const isEpisode = data.type === "episode";
           const tmdbId = isEpisode ? data.show?.ids?.tmdb : data.movie?.ids?.tmdb;
 
-          if (tmdbId) {
-            const mediaImgs = await getTmdbImageAction(
-              tmdbId,
-              isEpisode ? "tv" : "movie",
-              isEpisode ? data.episode?.season : undefined,
-              isEpisode ? data.episode?.number : undefined,
-            );
+          let resolvedImage: string | null = null;
 
-            let finalImage = isEpisode ? mediaImgs?.still : mediaImgs?.backdrop;
-
-            if (isEpisode && !finalImage) {
-              const showImgs = await getTmdbImageAction(tmdbId, "tv");
-              finalImage = showImgs?.backdrop || showImgs?.poster;
+          if (isEpisode) {
+            // Priority 1: TMDB Episode Still
+            if (tmdbId) {
+              const tmdbRes = await getTmdbImageAction(
+                tmdbId,
+                "tv",
+                data.episode?.season,
+                data.episode?.number,
+              ).catch(() => null);
+              resolvedImage = tmdbRes?.still ?? null;
             }
 
-            setImageUrl(finalImage || mediaImgs?.poster || null);
+            // Priority 2: Trakt Episode Screenshot (Target link)
+            if (!resolvedImage) {
+              resolvedImage = extractTraktImage(data.episode, ["screenshot", "thumb"]);
+            }
+
+            // Priority 3: TMDB Show Backdrop
+            if (!resolvedImage && tmdbId) {
+              const showRes = await getTmdbImageAction(tmdbId, "tv").catch(() => null);
+              resolvedImage = showRes?.backdrop ?? showRes?.poster ?? null;
+            }
+
+            // Priority 4: Trakt Show Fanart
+            if (!resolvedImage) {
+              resolvedImage = extractTraktImage(data.show, ["fanart", "poster"]);
+            }
+          } else {
+            // Movie Strategy
+            if (tmdbId) {
+              const tmdbRes = await getTmdbImageAction(tmdbId, "movie").catch(() => null);
+              resolvedImage = tmdbRes?.backdrop ?? tmdbRes?.poster ?? null;
+            }
+
+            if (!resolvedImage) {
+              resolvedImage = extractTraktImage(data.movie, ["fanart", "poster"]);
+            }
           }
+
+          setImageUrl(resolvedImage);
         }
         setScrobble(data);
         setIsVisible(true);
       }
     } catch (e) {
-      console.error("Watching check failed:", e);
+      console.error("[WatchingToast] Error:", e);
     } finally {
       isFetching.current = false;
     }
@@ -127,74 +175,41 @@ export function WatchingToast() {
   useEffect(() => {
     const runPolling = () => {
       checkWatching();
-      const baseInterval = document.hidden ? 180000 : 45000;
-      const nextInterval = baseInterval + backoffMs;
-      pollTimer.current = setTimeout(runPolling, nextInterval);
+      const interval = document.hidden ? 180000 : 45000;
+      pollTimer.current = setTimeout(runPolling, interval + backoffMs);
     };
 
-    runPolling();
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden && !isClosedManually) {
-        if (pollTimer.current) clearTimeout(pollTimer.current);
-        runPolling();
-      }
-    };
-
-    const handleCustomCheckin = () => {
-      setIsClosedManually(false);
-      setIsMinimized(false);
-      setBackoffMs(0);
-      if (pollTimer.current) clearTimeout(pollTimer.current);
+    if (!isClosedManually) {
       runPolling();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("trakt-checkin-updated", handleCustomCheckin);
+    }
 
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("trakt-checkin-updated", handleCustomCheckin);
     };
-  }, [checkWatching, isClosedManually, backoffMs]);
+    // Added isClosedManually back to stabilize the dependency array size
+  }, [checkWatching, backoffMs, isClosedManually]);
 
   useEffect(() => {
     if (!scrobble) return;
-    const updateProgress = () => {
+    const update = () => {
       const now = Date.now();
       const start = new Date(scrobble.started_at).getTime();
       const end = new Date(scrobble.expires_at).getTime();
-      const totalDuration = end - start;
-      const elapsed = now - start;
+      const total = end - start;
+      if (total > 0) setSmoothProgress(Math.min(100, Math.max(0, ((now - start) / total) * 100)));
 
-      if (totalDuration > 0) {
-        setSmoothProgress(Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)));
+      const diff = end - now;
+      if (diff <= 0) setTimeLeft("0m left");
+      else {
+        const mins = Math.floor(diff / 60000);
+        const hrs = Math.floor(mins / 60);
+        setTimeLeft(hrs > 0 ? `${hrs}h ${mins % 60}m left` : `${mins}m left`);
       }
-
-      setTimeLeft(formatTimeRemaining(scrobble.expires_at));
     };
-
-    updateProgress();
-    const frame = setInterval(updateProgress, 1000);
-    return () => clearInterval(frame);
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
   }, [scrobble]);
-
-  const handleCancelCheckin = async () => {
-    setIsVisible(false);
-    setIsClosedManually(true);
-    setShowCancelConfirm(false);
-    if (pollTimer.current) clearTimeout(pollTimer.current);
-
-    try {
-      await fetch("/api/trakt/checkin", { method: "DELETE" });
-      setScrobble(null);
-      lastMediaId.current = null;
-      router.refresh();
-    } catch (e) {
-      console.error("Cancel failed:", e);
-    }
-  };
 
   if (!isVisible || !scrobble) return null;
 
@@ -202,17 +217,11 @@ export function WatchingToast() {
   const mainTitle = isEpisode
     ? `${scrobble.episode?.season}x${String(scrobble.episode?.number).padStart(2, "0")} — ${scrobble.episode?.title}`
     : scrobble.movie?.title;
-  const subTitle = isEpisode ? scrobble.show?.title : scrobble.movie?.year;
+
   const showSlug = isEpisode ? scrobble.show?.ids.slug : scrobble.movie?.ids.slug;
-
-  const movieHref = !isEpisode && showSlug ? `/movies/${showSlug}` : null;
-  const episodeHref =
-    isEpisode && showSlug
-      ? `/shows/${showSlug}/seasons/${scrobble.episode?.season}/episodes/${scrobble.episode?.number}`
-      : null;
-
-  const mainHref = isEpisode ? episodeHref : movieHref;
-  const subHref = isEpisode ? (showSlug ? `/shows/${showSlug}` : null) : movieHref;
+  const mainHref = isEpisode
+    ? `/shows/${showSlug}/seasons/${scrobble.episode?.season}/episodes/${scrobble.episode?.number}`
+    : `/movies/${showSlug}`;
 
   if (isMinimized) {
     return (
@@ -242,7 +251,13 @@ export function WatchingToast() {
           </p>
           <div className="mt-4 flex gap-2">
             <button
-              onClick={handleCancelCheckin}
+              onClick={async () => {
+                setIsVisible(false);
+                setIsClosedManually(true);
+                await fetch("/api/trakt/checkin", { method: "DELETE" });
+                setScrobble(null);
+                router.refresh();
+              }}
               className="rounded-lg bg-red-600 px-4 py-1.5 text-[9px] font-black uppercase text-white hover:bg-red-500"
             >
               Confirm
@@ -260,8 +275,8 @@ export function WatchingToast() {
       <div className="relative flex flex-col gap-4 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="relative flex h-2 w-2 items-center justify-center">
-              <span className="animate-pulse rounded-full bg-red-800 h-2 w-2"></span>
+            <div className="relative h-2 w-2">
+              <span className="absolute inset-0 animate-pulse rounded-full bg-red-800"></span>
             </div>
             <span className="text-[9px] font-black uppercase tracking-[0.3em] text-red-500">
               Watching Now
@@ -272,13 +287,13 @@ export function WatchingToast() {
               onClick={() => setIsMinimized(true)}
               className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
             >
-              <Minus size={14} strokeWidth={3} />
+              <Minus size={14} />
             </button>
             <button
               onClick={() => setShowCancelConfirm(true)}
               className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
             >
-              <X size={14} strokeWidth={3} />
+              <X size={14} />
             </button>
           </div>
         </div>
@@ -306,31 +321,15 @@ export function WatchingToast() {
           </div>
 
           <div className="flex flex-1 flex-col justify-center min-w-0">
-            {mainHref ? (
-              <Link
-                href={mainHref}
-                className="truncate text-[12px] font-black text-white uppercase tracking-tight leading-tight hover:text-red-500 transition-colors"
-              >
-                {mainTitle}
-              </Link>
-            ) : (
-              <h4 className="truncate text-[12px] font-black text-white uppercase tracking-tight leading-tight">
-                {mainTitle}
-              </h4>
-            )}
-
-            {subHref ? (
-              <Link
-                href={subHref}
-                className="mt-1 truncate text-[9px] font-bold text-zinc-500 uppercase tracking-widest hover:text-zinc-200 transition-colors"
-              >
-                {subTitle}
-              </Link>
-            ) : (
-              <p className="mt-1 truncate text-[9px] font-bold text-zinc-500 uppercase tracking-widest">
-                {subTitle}
-              </p>
-            )}
+            <Link
+              href={mainHref}
+              className="truncate text-[12px] font-black text-white uppercase tracking-tight leading-tight hover:text-red-500 transition-colors"
+            >
+              {mainTitle}
+            </Link>
+            <p className="mt-1 truncate text-[9px] font-bold text-zinc-500 uppercase tracking-widest">
+              {isEpisode ? scrobble.show?.title : scrobble.movie?.year}
+            </p>
           </div>
         </div>
 

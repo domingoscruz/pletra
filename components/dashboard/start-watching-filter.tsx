@@ -6,6 +6,7 @@ import { CardGrid } from "./card-grid";
 
 /**
  * Interface strictly aligned with MediaCardProps requirements.
+ * Added isInWatchlist to ensure the UI reflects the saved state correctly.
  */
 interface TraktMediaItem {
   ids: Record<string, any>;
@@ -21,6 +22,7 @@ interface TraktMediaItem {
   userRating?: number | null;
   releasedAt?: string | null;
   airDate: number;
+  isInWatchlist?: boolean; // New property to track watchlist state
 }
 
 interface StartWatchingFilterProps {
@@ -33,6 +35,7 @@ export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWa
 
   /**
    * Memoized sorting and filtering logic.
+   * Items are sorted by airDate in descending order.
    */
   const filteredItems = useMemo(() => {
     let result: TraktMediaItem[] = [];
@@ -50,8 +53,7 @@ export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWa
 
   /**
    * Renders the grid content.
-   * Wrapped in an array [ ] when returning the empty state to satisfy CardGrid's
-   * requirement for ReactNode[] (multiple children/array).
+   * Maps through filteredItems and ensures isInWatchlist is passed to MediaCard.
    */
   const renderContent = () => {
     if (filteredItems.length === 0) {
@@ -87,6 +89,7 @@ export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWa
         releasedAt={item.releasedAt ?? undefined}
         variant="poster"
         showInlineActions={true}
+        isInWatchlist={item.isInWatchlist} // Correctly passing the watchlist state
       />
     ));
   };

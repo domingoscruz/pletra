@@ -4,7 +4,10 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { StartWatchingFilter } from "./start-watching-filter";
 
-// Fetch episode metadata with cache to prevent redundant API calls
+/**
+ * Fetch episode metadata with cache to prevent redundant API calls.
+ * We fetch the first episode to provide a direct entry point for shows in the watchlist.
+ */
 const getEpisodeMetadata = cache(async (client: any, showId: string | number) => {
   try {
     const res = await client.shows.episode.summary({
@@ -141,10 +144,13 @@ export async function StartWatching() {
         rating: item.show?.rating,
         userRating: showRatingMap.get(item.show?.ids?.trakt),
         mediaType: "shows" as const,
+        // The primary ID must be the show ID to match the watchlist status
         ids: item.show?.ids ?? {},
         episodeIds: epMeta?.ids ?? {},
         releasedAt: dateToUse ? String(dateToUse) : undefined,
         airDate: dateToUse ? new Date(dateToUse).getTime() : 0,
+        // Force the active state since we are fetching from the watchlist endpoint
+        isInWatchlist: true,
       };
     });
 
@@ -162,6 +168,8 @@ export async function StartWatching() {
       ids: item.movie?.ids ?? {},
       releasedAt: item.movie?.released ? String(item.movie.released) : undefined,
       airDate: item.movie?.released ? new Date(item.movie.released).getTime() : 0,
+      // Force the active state since we are fetching from the watchlist endpoint
+      isInWatchlist: true,
     }));
 
     return (

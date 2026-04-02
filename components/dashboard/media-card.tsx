@@ -57,6 +57,7 @@ export interface MediaCardProps {
   badge?: string;
   timeBadge?: string;
   isWatched?: boolean;
+  isInWatchlist?: boolean;
   priority?: boolean;
   /**
    * If true, enables the automatic "New Episode" badge
@@ -67,7 +68,7 @@ export interface MediaCardProps {
 
 /**
  * MediaCard component for displaying movies and shows.
- * Includes conditional logic for a "New Episode" badge.
+ * Includes logic to calculate watch progress and display relative badges.
  */
 export function MediaCard({
   title,
@@ -93,6 +94,7 @@ export function MediaCard({
   badge,
   timeBadge,
   isWatched = false,
+  isInWatchlist = false,
   priority = false,
   showNewBadge = false,
 }: MediaCardProps) {
@@ -133,7 +135,9 @@ export function MediaCard({
     setOptimisticRating(getNormalizedRating(userRating));
   }, [userRating]);
 
-  // Check for new release only if the prop showNewBadge is enabled
+  /**
+   * Checks if the content is a new release (within 48 hours).
+   */
   const checkIsNewRelease = () => {
     if (!showNewBadge || !releasedAt || mediaType === "movies") return false;
     const releaseDate = new Date(releasedAt).getTime();
@@ -167,10 +171,24 @@ export function MediaCard({
     }, 2000);
   };
 
+  /**
+   * Progress Calculation Logic:
+   * To prevent a "false 100%" on long series, we only allow 100%
+   * if completed matches or exceeds aired episodes.
+   * Otherwise, we cap it at 99% using Math.floor.
+   */
   const airedCount = totalAired ?? progress?.aired ?? 0;
   const completedCount = progress?.completed ?? 0;
-  const percentage =
-    airedCount > 0 ? Math.min(100, Math.round((completedCount / airedCount) * 100)) : 0;
+
+  let percentage = 0;
+  if (airedCount > 0) {
+    if (completedCount >= airedCount) {
+      percentage = 100;
+    } else {
+      percentage = Math.min(99, Math.floor((completedCount / airedCount) * 100));
+    }
+  }
+
   const remaining = Math.max(0, airedCount - completedCount);
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
@@ -238,7 +256,6 @@ export function MediaCard({
               )}
             </div>
 
-            {/* Conditional New Release Badge */}
             {isNewRelease && (
               <div className="absolute bottom-2 right-2 z-20 rounded-sm bg-[#9810fa] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl ring-1 ring-white/10">
                 New Episode
@@ -291,6 +308,7 @@ export function MediaCard({
             globalRating={typeof rating === "number" ? Math.round(rating * 10) : 0}
             releasedAt={releasedAt}
             isWatched={isWatched}
+            isInWatchlist={isInWatchlist}
             onRate={handleRate}
           />
         </div>
@@ -321,7 +339,6 @@ export function MediaCard({
 
       {isHovered &&
         mounted &&
-        typeof document !== "undefined" &&
         createPortal(
           <div
             className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"

@@ -7,6 +7,36 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
+ * Universal extractor for Trakt's image format in Server Components.
+ * Handles strings, arrays, and prepends https if missing.
+ */
+function extractTraktImage(
+  obj: any,
+  types: ("screenshot" | "thumb" | "fanart" | "poster")[],
+): string | null {
+  if (!obj || !obj.images) return null;
+
+  for (const type of types) {
+    const target = obj.images[type];
+    let rawUrl: string | null = null;
+
+    if (Array.isArray(target) && target.length > 0) {
+      rawUrl = target[0];
+    } else if (typeof target === "string") {
+      rawUrl = target;
+    } else if (target && typeof target === "object") {
+      rawUrl = target.medium || target.full || target.thumb || null;
+    }
+
+    if (rawUrl) {
+      return rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+    }
+  }
+
+  return null;
+}
+
+/**
  * RecentActivity component fetches and displays the user's latest
  * watched episodes and movies from Trakt history.
  */
@@ -15,15 +45,15 @@ export async function RecentActivity() {
 
   if (!client) return null;
 
-  // 1. Fetch base history for shows and movies
+  // 1. Fetch base history for shows and movies with extended images
   const [showRes, movieRes, epRatingsRes, movieRatingsRes] = await Promise.all([
     client.users.history.shows({
       params: { id: "me" },
-      query: { limit: 20 },
+      query: { limit: 20, extended: "full,images" as any },
     }),
     client.users.history.movies({
       params: { id: "me" },
-      query: { limit: 10, extended: "full" as any },
+      query: { limit: 10, extended: "full,images" as any },
     }),
     client.users.ratings.episodes({ params: { id: "me" } }).catch(() => null),
     client.users.ratings.movies({ params: { id: "me" } }).catch(() => null),
@@ -48,10 +78,6 @@ export async function RecentActivity() {
     ),
   );
 
-  /**
-   * We use a map to store metadata that isn't provided in the basic history items.
-   * This includes the release date and the community rating (average rating).
-   */
   const episodeMetadataMap = new Map<number, { releasedAt?: string; rating?: number }>();
 
   seasonsData.forEach((res) => {
@@ -62,7 +88,7 @@ export async function RecentActivity() {
             if (ep.ids?.trakt) {
               episodeMetadataMap.set(ep.ids.trakt, {
                 releasedAt: ep.first_aired,
-                rating: ep.rating, // Capturing the community rating here
+                rating: ep.rating,
               });
             }
           });
@@ -100,7 +126,7 @@ export async function RecentActivity() {
 
   if (allHistory.length === 0) return null;
 
-  // 3. Process items and fetch images
+  // 3. Process items and fetch images with prioritized fallback logic
   const items = await Promise.all(
     allHistory.map(async (item) => {
       const isEpisode = item.type === "episode";
@@ -108,18 +134,46 @@ export async function RecentActivity() {
 
       let finalImageUrl: string | null = null;
 
-      if (isEpisode && tmdbId) {
-        const [epImgs, showImgs] = await Promise.all([
-          fetchTmdbImages(tmdbId, "tv", item.episode?.season, item.episode?.number).catch(
-            () => null,
-          ),
-          fetchTmdbImages(tmdbId, "tv").catch(() => null),
-        ]);
-        finalImageUrl =
-          epImgs?.still || showImgs?.backdrop || epImgs?.poster || showImgs?.poster || null;
-      } else if (tmdbId) {
-        const movieImgs = await fetchTmdbImages(tmdbId, "movie").catch(() => null);
-        finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
+      if (isEpisode) {
+        // --- EPISODE IMAGE RESOLUTION ---
+        // 1. TMDB Episode Still
+        if (tmdbId) {
+          const epImgs = await fetchTmdbImages(
+            tmdbId,
+            "tv",
+            item.episode?.season,
+            item.episode?.number,
+          ).catch(() => null);
+          finalImageUrl = epImgs?.still || null;
+        }
+
+        // 2. Trakt Episode Screenshot/Thumb
+        if (!finalImageUrl) {
+          finalImageUrl = extractTraktImage(item.episode, ["screenshot", "thumb"]);
+        }
+
+        // 3. TMDB Show Backdrop
+        if (!finalImageUrl && tmdbId) {
+          const showImgs = await fetchTmdbImages(tmdbId, "tv").catch(() => null);
+          finalImageUrl = showImgs?.backdrop || showImgs?.poster || null;
+        }
+
+        // 4. Trakt Show Fanart
+        if (!finalImageUrl) {
+          finalImageUrl = extractTraktImage(item.show, ["fanart", "poster"]);
+        }
+      } else {
+        // --- MOVIE IMAGE RESOLUTION ---
+        // 1. TMDB Movie Backdrop
+        if (tmdbId) {
+          const movieImgs = await fetchTmdbImages(tmdbId, "movie").catch(() => null);
+          finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
+        }
+
+        // 2. Trakt Movie Fanart/Poster
+        if (!finalImageUrl) {
+          finalImageUrl = extractTraktImage(item.movie, ["fanart", "poster"]);
+        }
       }
 
       const title = isEpisode ? (item.show?.title ?? "Unknown") : (item.movie?.title ?? "Unknown");
@@ -127,7 +181,6 @@ export async function RecentActivity() {
         ? `${item.episode?.season}x${String(item.episode?.number).padStart(2, "0")}`
         : "";
 
-      // Retrieve metadata from our map for episodes
       const episodeMetadata = isEpisode ? episodeMetadataMap.get(item.episode?.ids?.trakt) : null;
 
       return {
@@ -145,7 +198,6 @@ export async function RecentActivity() {
           : `/movies/${item.movie?.ids?.slug}`,
         showHref: isEpisode ? `/shows/${item.show?.ids?.slug}` : undefined,
         backdropUrl: finalImageUrl,
-        // For episodes, we use the mapped rating. For movies, history with "full" contains the rating.
         rating: isEpisode ? episodeMetadata?.rating : item.movie?.rating,
         userRating: isEpisode
           ? epRatingMap.get(item.episode?.ids?.trakt)
