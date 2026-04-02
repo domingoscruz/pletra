@@ -8,7 +8,7 @@ import { MediaCard } from "./media-card";
 import { unstable_cache } from "next/cache";
 
 /**
- * Interfaces for Trakt Data Structures
+ * Trakt API and Internal Data Interfaces
  */
 export interface FollowingUser {
   followed_at?: string;
@@ -45,16 +45,15 @@ export interface HistoryItem {
   _user?: FollowingUser["user"];
 }
 
-/**
- * Minimal metadata structure to stay under Next.js 2MB cache limit.
- */
 interface ThinnedEpisodeMetadata {
   firstAired: string;
   rating: number;
 }
 
 /**
- * Optimization: Cached fetch for individual friend history.
+ * Fetches and caches individual friend history.
+ * Revalidate time increased to 600s (10m) to further protect against 429 errors
+ * when scaling to a high number of friends.
  */
 const getCachedFriendHistory = (username: string) =>
   unstable_cache(
@@ -68,18 +67,17 @@ const getCachedFriendHistory = (username: string) =>
         });
         return res.status === 200 ? (res.body as HistoryItem[]) : [];
       } catch (error) {
-        console.error(`[Pletra] Error fetching history for ${username}:`, error);
+        console.error(`[Pletra] API Error for ${username}:`, error);
         return [];
       }
     },
-    [`friend-history-v2-${username}`],
-    { revalidate: 300, tags: [`history-${username}`] },
+    [`friend-history-v3-${username}`],
+    { revalidate: 600, tags: [`history-${username}`] },
   )();
 
 /**
- * Optimization: Thinned metadata caching.
- * Instead of storing the whole Trakt Season/Episode object (which causes the 2MB error),
- * we only store a map of TraktID -> { firstAired, rating }.
+ * Caches essential show metadata only.
+ * This prevents the "2MB Cache Limit" error by stripping heavy JSON fields.
  */
 const getCachedThinnedShowMetadata = (slug: string) =>
   unstable_cache(
@@ -95,8 +93,6 @@ const getCachedThinnedShowMetadata = (slug: string) =>
         if (res.status !== 200 || !Array.isArray(res.body)) return {};
 
         const thinnedMap: Record<number, ThinnedEpisodeMetadata> = {};
-
-        // Extract only the essential data to minimize cache size
         res.body.forEach((season: any) => {
           season.episodes?.forEach((ep: any) => {
             if (ep.ids?.trakt) {
@@ -113,12 +109,12 @@ const getCachedThinnedShowMetadata = (slug: string) =>
         return {};
       }
     },
-    [`show-metadata-thinned-${slug}`],
+    [`show-metadata-v2-thinned-${slug}`],
     { revalidate: 3600, tags: [`show-metadata-${slug}`] },
   )();
 
 /**
- * Fetches authenticated user metadata for sync purposes (watch status/ratings).
+ * Fetches current authenticated user's metadata.
  */
 async function fetchUserMetadata() {
   const client = await getAuthenticatedTraktClient();
@@ -159,13 +155,13 @@ async function fetchUserMetadata() {
 
     return { movieIds, showData, epRatings, movieRatings };
   } catch (error) {
-    console.error("[Pletra] Error fetching user metadata:", error);
+    console.error("[Pletra] Metadata Fetch Error:", error);
     return { movieIds: [], showData: {}, epRatings: {}, movieRatings: {} };
   }
 }
 
 const getCachedUserMetadata = (userSlug: string) =>
-  unstable_cache(async () => fetchUserMetadata(), [`user-metadata-activity-${userSlug}`], {
+  unstable_cache(async () => fetchUserMetadata(), [`user-metadata-v2-${userSlug}`], {
     revalidate: 600,
     tags: [`watched-${userSlug}`, `ratings-${userSlug}`],
   })();
@@ -188,10 +184,14 @@ export async function FriendsActivity() {
 
   if (followingRes.status !== 200) return null;
 
-  const FRIENDS_LIMIT = 50;
-  const ITEMS_PER_PAGE = 10;
-  const TOTAL_PAGES = 5;
-  const TOTAL_ITEMS_LIMIT = ITEMS_PER_PAGE * TOTAL_PAGES;
+  /**
+   * Configuration for expanded Friend Activity feed.
+   * Total items: 100 (10 columns per page * 10 pages).
+   */
+  const FRIENDS_LIMIT = 100;
+  const ITEMS_PER_ROW = 10;
+  const TOTAL_PAGES = 10;
+  const TOTAL_ITEMS_LIMIT = ITEMS_PER_ROW * TOTAL_PAGES;
 
   const following = (followingRes.body as FollowingUser[])
     .filter((f) => f.user && !f.user.private)
@@ -199,7 +199,7 @@ export async function FriendsActivity() {
 
   if (following.length === 0) return null;
 
-  // Parallel fetch using granular caches to avoid Trakt 429 errors
+  // Process all friends in parallel using granular cache
   const userActivities = await Promise.all(
     following.map(async (friend) => {
       const username = friend.user!.ids?.slug ?? friend.user!.username!;
@@ -219,16 +219,14 @@ export async function FriendsActivity() {
     new Set(sortedActivities.map((a) => a.show?.ids?.slug).filter(Boolean)),
   );
 
-  // Fetching thinned maps to resolve the 2MB cache error
   const seasonsMetadataResults = await Promise.all(
     uniqueShowSlugs.map((slug) => getCachedThinnedShowMetadata(slug as string)),
   );
 
-  // Merge all thinned maps into a single lookup table
   const episodeMetadataMap = new Map<number, ThinnedEpisodeMetadata>();
   seasonsMetadataResults.forEach((map) => {
     Object.entries(map).forEach(([traktId, data]) => {
-      episodeMetadataMap.set(Number(traktId), data);
+      episodeMetadataMap.set(Number(traktId), data as ThinnedEpisodeMetadata);
     });
   });
 
