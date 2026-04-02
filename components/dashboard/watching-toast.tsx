@@ -6,6 +6,7 @@ import { ProxiedImage } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { getTmdbImageAction } from "@/app/actions/tmdb";
+import { useWatching } from "@/lib/use-watching";
 
 interface TraktIds {
   trakt: number;
@@ -40,10 +41,11 @@ interface TraktWatchingResponse {
 
 export function WatchingToast() {
   const router = useRouter();
+  const { isMinimized, setIsMinimized, setIsWatching } = useWatching();
+
   const [scrobble, setScrobble] = useState<TraktWatchingResponse | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
   const [isClosedManually, setIsClosedManually] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [smoothProgress, setSmoothProgress] = useState(0);
@@ -54,10 +56,6 @@ export function WatchingToast() {
   const pollTimer = useRef<NodeJS.Timeout | null>(null);
   const isFetching = useRef(false);
 
-  /**
-   * Universal extractor for Trakt's image format.
-   * Specifically targets screenshot/thumb for episodes.
-   */
   const extractTraktImage = (
     obj: any,
     types: ("screenshot" | "thumb" | "fanart" | "poster")[],
@@ -80,7 +78,6 @@ export function WatchingToast() {
         return rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
       }
     }
-
     return null;
   };
 
@@ -102,6 +99,7 @@ export function WatchingToast() {
 
       if (res.status === 204) {
         setIsVisible(false);
+        setIsWatching(false);
         setScrobble(null);
         setImageUrl(null);
         lastMediaId.current = null;
@@ -122,7 +120,6 @@ export function WatchingToast() {
           let resolvedImage: string | null = null;
 
           if (isEpisode) {
-            // Priority 1: TMDB Episode Still
             if (tmdbId) {
               const tmdbRes = await getTmdbImageAction(
                 tmdbId,
@@ -133,23 +130,19 @@ export function WatchingToast() {
               resolvedImage = tmdbRes?.still ?? null;
             }
 
-            // Priority 2: Trakt Episode Screenshot (Target link)
             if (!resolvedImage) {
               resolvedImage = extractTraktImage(data.episode, ["screenshot", "thumb"]);
             }
 
-            // Priority 3: TMDB Show Backdrop
             if (!resolvedImage && tmdbId) {
               const showRes = await getTmdbImageAction(tmdbId, "tv").catch(() => null);
               resolvedImage = showRes?.backdrop ?? showRes?.poster ?? null;
             }
 
-            // Priority 4: Trakt Show Fanart
             if (!resolvedImage) {
               resolvedImage = extractTraktImage(data.show, ["fanart", "poster"]);
             }
           } else {
-            // Movie Strategy
             if (tmdbId) {
               const tmdbRes = await getTmdbImageAction(tmdbId, "movie").catch(() => null);
               resolvedImage = tmdbRes?.backdrop ?? tmdbRes?.poster ?? null;
@@ -159,18 +152,18 @@ export function WatchingToast() {
               resolvedImage = extractTraktImage(data.movie, ["fanart", "poster"]);
             }
           }
-
           setImageUrl(resolvedImage);
         }
         setScrobble(data);
         setIsVisible(true);
+        setIsWatching(true);
       }
     } catch (e) {
-      console.error("[WatchingToast] Error:", e);
+      console.error("[WatchingToast] Error fetching scrobble:", e);
     } finally {
       isFetching.current = false;
     }
-  }, [isClosedManually]);
+  }, [isClosedManually, setIsWatching]);
 
   useEffect(() => {
     const runPolling = () => {
@@ -186,7 +179,6 @@ export function WatchingToast() {
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
-    // Added isClosedManually back to stabilize the dependency array size
   }, [checkWatching, backoffMs, isClosedManually]);
 
   useEffect(() => {
@@ -242,7 +234,7 @@ export function WatchingToast() {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-[100] w-[380px] select-none overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_20px_50px_rgba(0,0,0,1)] animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="fixed bottom-6 right-6 z-[100] w-[calc(100%-48px)] max-w-[380px] select-none overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_20px_50px_rgba(0,0,0,1)] animate-in fade-in slide-in-from-bottom-4 duration-300 md:w-[380px]">
       {showCancelConfirm && (
         <div className="absolute inset-0 z-[110] flex flex-col items-center justify-center bg-zinc-950/95 backdrop-blur-sm text-center animate-in fade-in duration-200">
           <AlertCircle size={20} className="mb-2 text-red-500" />
@@ -253,6 +245,7 @@ export function WatchingToast() {
             <button
               onClick={async () => {
                 setIsVisible(false);
+                setIsWatching(false);
                 setIsClosedManually(true);
                 await fetch("/api/trakt/checkin", { method: "DELETE" });
                 setScrobble(null);
@@ -299,7 +292,7 @@ export function WatchingToast() {
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="relative aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-white/5">
+          <div className="relative aspect-video w-24 shrink-0 overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-white/5 sm:w-28">
             {imageUrl ? (
               <ProxiedImage
                 src={imageUrl}

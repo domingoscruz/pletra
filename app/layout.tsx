@@ -5,6 +5,7 @@ import { Providers } from "@/components/providers";
 import { FloatingNav } from "@/components/nav/floating-nav";
 import { SearchPalette } from "@/components/search/search-palette";
 import { WatchingToast } from "@/components/dashboard/watching-toast";
+import { WatchingProvider } from "@/lib/use-watching";
 import "./globals.css";
 
 const tasaOrbiter = localFont({
@@ -36,10 +37,16 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <Providers>
-          <main className="flex-1 pb-20">{children}</main>
-          <FloatingNav />
-          <SearchPalette />
-          <WatchingToast />
+          {/*
+            WatchingProvider wraps global navigation and notification components
+            to handle UI collisions on responsive views.
+          */}
+          <WatchingProvider>
+            <main className="flex-1 pb-20">{children}</main>
+            <FloatingNav />
+            <SearchPalette />
+            <WatchingToast />
+          </WatchingProvider>
         </Providers>
       </body>
     </html>

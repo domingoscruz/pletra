@@ -6,329 +6,343 @@ import { usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { useSettings } from "@/lib/settings";
+import { useWatching } from "@/lib/use-watching";
 
 function getTraktUrl(pathname: string): string | null {
-	const movieMatch = pathname.match(/^\/movies\/([^/]+)/);
-	if (movieMatch) return `https://trakt.tv/movies/${movieMatch[1]}`;
+  const movieMatch = pathname.match(/^\/movies\/([^/]+)/);
+  if (movieMatch) return `https://trakt.tv/movies/${movieMatch[1]}`;
 
-	const episodeMatch = pathname.match(/^\/shows\/([^/]+)\/seasons\/(\d+)\/episodes\/(\d+)/);
-	if (episodeMatch)
-		return `https://trakt.tv/shows/${episodeMatch[1]}/seasons/${episodeMatch[2]}/episodes/${episodeMatch[3]}`;
+  const episodeMatch = pathname.match(/^\/shows\/([^/]+)\/seasons\/(\d+)\/episodes\/(\d+)/);
+  if (episodeMatch)
+    return `https://trakt.tv/shows/${episodeMatch[1]}/seasons/${episodeMatch[2]}/episodes/${episodeMatch[3]}`;
 
-	const seasonMatch = pathname.match(/^\/shows\/([^/]+)\/seasons\/(\d+)/);
-	if (seasonMatch) return `https://trakt.tv/shows/${seasonMatch[1]}/seasons/${seasonMatch[2]}`;
+  const seasonMatch = pathname.match(/^\/shows\/([^/]+)\/seasons\/(\d+)/);
+  if (seasonMatch) return `https://trakt.tv/shows/${seasonMatch[1]}/seasons/${seasonMatch[2]}`;
 
-	const showMatch = pathname.match(/^\/shows\/([^/]+)/);
-	if (showMatch) return `https://trakt.tv/shows/${showMatch[1]}`;
+  const showMatch = pathname.match(/^\/shows\/([^/]+)/);
+  if (showMatch) return `https://trakt.tv/shows/${showMatch[1]}`;
 
-	const personMatch = pathname.match(/^\/people\/([^/]+)/);
-	if (personMatch) return `https://trakt.tv/people/${personMatch[1]}`;
+  const personMatch = pathname.match(/^\/people\/([^/]+)/);
+  if (personMatch) return `https://trakt.tv/people/${personMatch[1]}`;
 
-	const userMatch = pathname.match(/^\/users\/([^/]+)/);
-	if (userMatch) return `https://trakt.tv/users/${userMatch[1]}`;
+  const userMatch = pathname.match(/^\/users\/([^/]+)/);
+  if (userMatch) return `https://trakt.tv/users/${userMatch[1]}`;
 
-	return null;
+  return null;
 }
 
 function SettingsPopover({ isSignedIn }: { isSignedIn: boolean }) {
-	const { settings, updateSetting } = useSettings();
-	const [open, setOpen] = useState(false);
-	const popoverRef = useRef<HTMLDivElement>(null);
-	const router = useRouter();
+  const { settings, updateSetting } = useSettings();
+  const [open, setOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
-	useEffect(() => {
-		function handleClickOutside(e: MouseEvent) {
-			if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-				setOpen(false);
-			}
-		}
-		if (open) {
-			document.addEventListener("mousedown", handleClickOutside);
-			return () => document.removeEventListener("mousedown", handleClickOutside);
-		}
-	}, [open]);
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
 
-	return (
-		<div ref={popoverRef} className="relative">
-			<button
-				onClick={() => setOpen(!open)}
-				className={`flex h-9 cursor-pointer items-center rounded-full px-3 text-sm transition-colors ${
-					open ? "text-white" : "text-zinc-400 hover:text-white"
-				}`}
-				title="Settings"
-			>
-				<svg
-					className="h-4 w-4"
-					fill="none"
-					stroke="currentColor"
-					strokeWidth={1.5}
-					viewBox="0 0 24 24"
-				>
-					<path
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
-					/>
-					<path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-				</svg>
-			</button>
+  return (
+    <div ref={popoverRef} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex h-9 cursor-pointer items-center rounded-full px-3 text-sm transition-colors ${
+          open ? "text-white" : "text-zinc-400 hover:text-white"
+        }`}
+        title="Settings"
+      >
+        <svg
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
+          />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </button>
 
-			{open && (
-				<div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl bg-zinc-900/95 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
-					<p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
-						Settings
-					</p>
-					<label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/5">
-						<span className="text-sm text-zinc-300">Show Backdrops</span>
-						<button
-							role="switch"
-							aria-checked={settings.showBackdrops}
-							onClick={() => updateSetting("showBackdrops", !settings.showBackdrops)}
-							className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
-								settings.showBackdrops ? "bg-accent" : "bg-zinc-700"
-							}`}
-						>
-							<span
-								className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-									settings.showBackdrops ? "translate-x-4" : "translate-x-0"
-								}`}
-							/>
-						</button>
-					</label>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-2 w-56 rounded-xl bg-zinc-900/95 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+            Settings
+          </p>
+          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/5">
+            <span className="text-sm text-zinc-300">Show Backdrops</span>
+            <button
+              role="switch"
+              aria-checked={settings.showBackdrops}
+              onClick={() => updateSetting("showBackdrops", !settings.showBackdrops)}
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+                settings.showBackdrops ? "bg-accent" : "bg-zinc-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  settings.showBackdrops ? "translate-x-4" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </label>
 
-					<label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/5">
-						<span className="text-sm text-zinc-300">Default View</span>
-						<div className="flex gap-0.5 rounded-md bg-zinc-800 p-0.5">
-							<button
-								onClick={() => updateSetting("defaultView", "grid")}
-								className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-									settings.defaultView === "grid"
-										? "bg-white/10 text-white"
-										: "text-zinc-500 hover:text-zinc-300"
-								}`}
-							>
-								Grid
-							</button>
-							<button
-								onClick={() => updateSetting("defaultView", "list")}
-								className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-									settings.defaultView === "list"
-										? "bg-white/10 text-white"
-										: "text-zinc-500 hover:text-zinc-300"
-								}`}
-							>
-								List
-							</button>
-						</div>
-					</label>
+          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/5">
+            <span className="text-sm text-zinc-300">Default View</span>
+            <div className="flex gap-0.5 rounded-md bg-zinc-800 p-0.5">
+              <button
+                onClick={() => updateSetting("defaultView", "grid")}
+                className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
+                  settings.defaultView === "grid"
+                    ? "bg-white/10 text-white"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                Grid
+              </button>
+              <button
+                onClick={() => updateSetting("defaultView", "list")}
+                className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
+                  settings.defaultView === "list"
+                    ? "bg-white/10 text-white"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                List
+              </button>
+            </div>
+          </label>
 
-					{isSignedIn && (
-						<>
-							<div className="my-2 h-px bg-zinc-800" />
-							<button
-								onClick={async () => {
-									setOpen(false);
-									await authClient.signOut();
-									router.push("/auth/login");
-								}}
-								className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
-							>
-								<svg
-									className="h-4 w-4"
-									fill="none"
-									stroke="currentColor"
-									strokeWidth={1.5}
-									viewBox="0 0 24 24"
-								>
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
-									/>
-								</svg>
-								Sign out
-							</button>
-						</>
-					)}
-				</div>
-			)}
-		</div>
-	);
+          {isSignedIn && (
+            <>
+              <div className="my-2 h-px bg-zinc-800" />
+              <button
+                onClick={async () => {
+                  setOpen(false);
+                  await authClient.signOut();
+                  router.push("/auth/login");
+                }}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
+                  />
+                </svg>
+                Sign out
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function FloatingNav() {
-	const pathname = usePathname();
-	const { data: session } = authClient.useSession();
-	const isHome = pathname === "/";
-	const isExplore = pathname.startsWith("/explore");
-	const isCalendar = pathname.startsWith("/calendar");
-	const traktUrl = getTraktUrl(pathname);
-	const userSlug = session?.user?.email?.replace(/@trakt\.tv$/, "") || null;
-	const isProfile = userSlug && pathname === `/users/${userSlug}`;
+  const pathname = usePathname();
+  const { data: session } = authClient.useSession();
+  const { isWatching, isMinimized } = useWatching(); // State from Trakt watching status
+  const isHome = pathname === "/";
+  const isExplore = pathname.startsWith("/explore");
+  const isCalendar = pathname.startsWith("/calendar");
+  const traktUrl = getTraktUrl(pathname);
+  const userSlug = session?.user?.email?.replace(/@trakt\.tv$/, "") || null;
+  const isProfile = userSlug && pathname === `/users/${userSlug}`;
 
-	return (
-		<div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
-			<nav className="flex items-center gap-1 rounded-full bg-zinc-900/90 px-2 py-1.5 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
-				{/* Home */}
-				<Link
-					href="/"
-					className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-						isHome ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
-					}`}
-					title="Home"
-				>
-					<svg
-						className="h-4 w-4"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={1.5}
-						viewBox="0 0 24 24"
-					>
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-						/>
-					</svg>
-				</Link>
+  /**
+   * Logic to determine if the navigation should shift to the left.
+   * This occurs on mobile when a scrobble is active and the toast is minimized.
+   */
+  const shouldShiftLeft = isWatching && isMinimized;
 
-				{/* Explore */}
-				<Link
-					href="/explore"
-					className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-						isExplore ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
-					}`}
-					title="Explore"
-				>
-					<svg
-						className="h-4 w-4"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={1.5}
-						viewBox="0 0 24 24"
-					>
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418"
-						/>
-					</svg>
-				</Link>
+  return (
+    <div
+      className={`fixed bottom-6 z-50 transition-all duration-300 ease-in-out ${
+        shouldShiftLeft
+          ? "left-6 translate-x-0" // Shifted position for mobile collision
+          : "left-1/2 -translate-x-1/2" // Standard centered position
+      } md:left-1/2 md:-translate-x-1/2`} // Always centered on desktop
+    >
+      <nav className="flex items-center gap-1 rounded-full bg-zinc-900/90 px-2 py-1.5 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
+        {/* Home */}
+        <Link
+          href="/"
+          className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
+            isHome ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+          }`}
+          title="Home"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+            />
+          </svg>
+        </Link>
 
-				{/* Calendar */}
-				{session?.user && (
-					<Link
-						href="/calendar"
-						className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
-							isCalendar ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
-						}`}
-						title="Calendar"
-					>
-						<svg
-							className="h-4 w-4"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth={1.5}
-							viewBox="0 0 24 24"
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-							/>
-						</svg>
-					</Link>
-				)}
+        {/* Explore */}
+        <Link
+          href="/explore"
+          className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
+            isExplore ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+          }`}
+          title="Explore"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 003 12c0-1.605.42-3.113 1.157-4.418"
+            />
+          </svg>
+        </Link>
 
-				{/* Search trigger */}
-				<button
-					onClick={() => {
-						window.dispatchEvent(new CustomEvent("open-search-palette"));
-					}}
-					className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-white"
-					title="Search (⌘P)"
-				>
-					<svg
-						className="h-4 w-4"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={1.5}
-						viewBox="0 0 24 24"
-					>
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-						/>
-					</svg>
-				</button>
+        {/* Calendar */}
+        {session?.user && (
+          <Link
+            href="/calendar"
+            className={`flex h-9 items-center rounded-full px-3 text-sm font-medium transition-colors ${
+              isCalendar ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+            title="Calendar"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+              />
+            </svg>
+          </Link>
+        )}
 
-				{/* Profile */}
-				{userSlug && (
-					<Link
-						href={`/users/${userSlug}`}
-						className={`flex h-9 items-center rounded-full px-3 text-sm transition-colors ${
-							isProfile ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
-						}`}
-						title="Profile"
-					>
-						<svg
-							className="h-4 w-4"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth={1.5}
-							viewBox="0 0 24 24"
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-							/>
-						</svg>
-					</Link>
-				)}
+        {/* Search trigger */}
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("open-search-palette"));
+          }}
+          className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-white"
+          title="Search (⌘P)"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+            />
+          </svg>
+        </button>
 
-				{/* External Trakt link */}
-				<>
-					<div className="h-5 w-px bg-zinc-700" />
-					<a
-						href={traktUrl ?? "https://trakt.tv"}
-						target="_blank"
-						rel="noopener noreferrer"
-						className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-[#ed1c24]"
-						title="View on Trakt"
-					>
-						<svg
-							className="h-4 w-4"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth={1.5}
-							viewBox="0 0 24 24"
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-							/>
-						</svg>
-					</a>
-				</>
+        {/* Profile */}
+        {userSlug && (
+          <Link
+            href={`/users/${userSlug}`}
+            className={`flex h-9 items-center rounded-full px-3 text-sm transition-colors ${
+              isProfile ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+            title="Profile"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+              />
+            </svg>
+          </Link>
+        )}
 
-				<div className="h-5 w-px bg-zinc-700" />
+        {/* External Trakt link */}
+        <>
+          <div className="h-5 w-px bg-zinc-700" />
+          <a
+            href={traktUrl ?? "https://trakt.tv"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-9 cursor-pointer items-center rounded-full px-3 text-sm text-zinc-400 transition-colors hover:text-[#ed1c24]"
+            title="View on Trakt"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+              />
+            </svg>
+          </a>
+        </>
 
-				{/* Settings (includes sign out) */}
-				<SettingsPopover isSignedIn={!!session?.user} />
+        <div className="h-5 w-px bg-zinc-700" />
 
-				{/* Sign in link for unauthenticated users */}
-				{!session?.user && (
-					<Link
-						href="/auth/login"
-						className="flex h-9 items-center rounded-full px-4 text-sm text-zinc-400 transition-colors hover:text-white"
-					>
-						Sign in
-					</Link>
-				)}
-			</nav>
-		</div>
-	);
+        {/* Settings (includes sign out) */}
+        <SettingsPopover isSignedIn={!!session?.user} />
+
+        {/* Sign in link for unauthenticated users */}
+        {!session?.user && (
+          <Link
+            href="/auth/login"
+            className="flex h-9 items-center rounded-full px-4 text-sm text-zinc-400 transition-colors hover:text-white"
+          >
+            Sign in
+          </Link>
+        )}
+      </nav>
+    </div>
+  );
 }
