@@ -12,13 +12,16 @@ interface TraktTokenResponse {
   created_at: number;
 }
 
+/**
+ * Refreshes the Trakt OAuth token using the refresh_token.
+ */
 async function refreshTraktToken(refreshToken: string): Promise<string | null> {
   const clientId = process.env.TRAKT_CLIENT_ID;
   const clientSecret = process.env.TRAKT_CLIENT_SECRET;
   const redirectUri = process.env.NEXT_PUBLIC_TRAKT_REDIRECT_URI;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    console.error("[Trakt Auth] Critical: Missing OAuth environment variables.");
+    console.error("[Trakt Auth] Critical: Missing OAuth environment variables for token refresh.");
     return null;
   }
 
@@ -36,7 +39,8 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
     });
 
     if (!response.ok) {
-      console.error(`[Trakt Auth] Refresh failed. Status: ${response.status}`);
+      const errorData = await response.text();
+      console.error(`[Trakt Auth] Refresh failed. Status: ${response.status} | Data: ${errorData}`);
       return null;
     }
 
@@ -44,7 +48,7 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
     const cookieStore = await cookies();
 
     try {
-      // Writing cookies only works in Server Actions or Route Handlers
+      // Tokens are persisted in cookies for subsequent server-side requests
       cookieStore.set("trakt_access_token", data.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -56,10 +60,12 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         path: "/",
-        maxAge: 60 * 60 * 24 * 90,
+        maxAge: 60 * 60 * 24 * 90, // 90 days
       });
     } catch (e) {
-      console.warn("[Trakt Auth] Could not update cookies in this context.");
+      console.warn(
+        "[Trakt Auth] Warning: Could not update cookies (not in a Server Action or Route Handler).",
+      );
     }
 
     return data.access_token;
@@ -69,6 +75,9 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
   }
 }
 
+/**
+ * Creates and configures the Trakt API client.
+ */
 export function createTraktClient(
   providedAccessToken?: string,
   providedRefreshToken?: string,
@@ -76,7 +85,7 @@ export function createTraktClient(
   const clientId = process.env.TRAKT_CLIENT_ID;
 
   if (!clientId) {
-    console.error("[Trakt Config] TRAKT_CLIENT_ID is missing.");
+    console.error("[Trakt Config] Error: TRAKT_CLIENT_ID is not defined in environment variables.");
   }
 
   return traktApi({
@@ -86,37 +95,48 @@ export function createTraktClient(
       let accessToken = providedAccessToken;
       let refreshToken = providedRefreshToken;
 
-      // Only invoke cookies() if tokens aren't provided to avoid unstable_cache errors
+      // Attempt to retrieve tokens from cookies if not explicitly provided
       if (!accessToken || !refreshToken) {
         try {
           const cookieStore = await cookies();
           accessToken = accessToken || cookieStore.get("trakt_access_token")?.value;
           refreshToken = refreshToken || cookieStore.get("trakt_refresh_token")?.value;
         } catch (e) {
-          // Dynamic context might not be available
+          // Context might be static or cookies not accessible
         }
       }
 
+      /**
+       * Helper to generate headers for every request
+       */
       const buildHeaders = (token?: string) => {
         const headers = new Headers(init?.headers);
         headers.set("trakt-api-version", "2");
-        if (clientId) headers.set("trakt-api-key", clientId);
-        if (token) headers.set("Authorization", `Bearer ${token}`);
-        headers.set("user-agent", "pletra/1.0");
+        headers.set("trakt-api-key", clientId || "");
+        headers.set("Content-Type", "application/json");
+        headers.set("User-Agent", "Pletra/1.0 (Next.js Managed Client)");
+
+        if (token) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
+
         return headers;
       };
 
+      // Initial request attempt
       let response = await fetch(url, {
         ...init,
         headers: buildHeaders(accessToken),
-        cache: "no-store",
+        cache: "no-store", // Ensure we get fresh data for sync/progress
       });
 
+      // Handle 401 Unauthorized (Expired Token)
       if (response.status === 401 && refreshToken) {
-        console.log(`[Trakt API] Token expired for ${url}. Attempting refresh...`);
+        console.log(`[Trakt API] 401 detected for ${url}. Attempting token refresh...`);
         const newAccessToken = await refreshTraktToken(refreshToken);
 
         if (newAccessToken) {
+          console.log(`[Trakt API] Refresh successful. Retrying request to ${url}`);
           response = await fetch(url, {
             ...init,
             headers: buildHeaders(newAccessToken),
@@ -125,13 +145,26 @@ export function createTraktClient(
         }
       }
 
+      // Final error handling
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[Trakt API Error] ${url} | ${response.status} | ${errorText}`);
+        console.error(
+          `[Trakt API Error] Endpoint: ${url} | Status: ${response.status} | Body: ${errorText}`,
+        );
 
-        if (response.status === 403) throw new Error("TRAKT_FORBIDDEN: Check API Key/Permissions.");
-        if (response.status === 401) throw new Error("TRAKT_UNAUTHORIZED: Token refresh failed.");
-        throw new Error(`Trakt error [${response.status}]: ${errorText}`);
+        if (response.status === 403) {
+          throw new Error(
+            "TRAKT_FORBIDDEN: Access denied. Check your API Key permissions or endpoint validity.",
+          );
+        }
+
+        if (response.status === 401) {
+          throw new Error(
+            "TRAKT_UNAUTHORIZED: Authentication failed and refresh was not possible.",
+          );
+        }
+
+        throw new Error(`Trakt API failure [${response.status}]: ${errorText}`);
       }
 
       return response;
