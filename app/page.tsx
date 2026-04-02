@@ -1,10 +1,3 @@
-/**
- * Pletra Dashboard Page
- *
- * Main dashboard view using React 19 Suspense for streaming data.
- * All skeletons are calibrated to match the final rendered component heights.
- */
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -17,9 +10,6 @@ import { FriendsActivity } from "@/components/dashboard/friends-activity";
 import { ProfileBackdrop } from "@/components/dashboard/profile-backdrop";
 import { CardGridSkeleton } from "@/components/dashboard/media-card-skeleton";
 
-/**
- * Renders a shimmering header for sections to maintain vertical rhythm.
- */
 function SectionHeaderSkeleton() {
   return (
     <div className="mb-4 flex items-center gap-3">
@@ -29,9 +19,6 @@ function SectionHeaderSkeleton() {
   );
 }
 
-/**
- * Placeholder for the profile backdrop to prevent content jumping at the top.
- */
 function ProfileBackdropSkeleton() {
   return <div className="relative h-[40vh] w-full animate-pulse bg-zinc-900/40 lg:h-[50vh]" />;
 }
@@ -39,16 +26,11 @@ function ProfileBackdropSkeleton() {
 export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-black">
-      {/*
-        Prevents the entire page content from being pushed down 
-        after the backdrop image loads.
-      */}
       <Suspense fallback={<ProfileBackdropSkeleton />}>
         <ProfileBackdrop />
       </Suspense>
 
       <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-20 pt-4 md:space-y-12 md:pt-6 lg:px-8">
-        {/* Continue Watching Section - Wrapped in a container with fixed min-height */}
         <section className="w-full overflow-hidden">
           <Suspense
             fallback={
@@ -64,7 +46,6 @@ export default function DashboardPage() {
           </Suspense>
         </section>
 
-        {/* Recent Activity Section */}
         <section className="w-full">
           <Suspense
             fallback={
@@ -80,7 +61,6 @@ export default function DashboardPage() {
           </Suspense>
         </section>
 
-        {/* Start Watching Section */}
         <section className="w-full">
           <Suspense
             fallback={
@@ -96,14 +76,15 @@ export default function DashboardPage() {
           </Suspense>
         </section>
 
-        {/* Bottom Grid for Schedule and Friends */}
-        <div className="grid grid-cols-1 gap-8 md:gap-12">
+        <div className="grid grid-cols-1 gap-8 md:gap-12 lg:grid-cols-1">
           <section className="w-full">
             <Suspense
               fallback={
                 <div className="flex flex-col gap-4">
                   <SectionHeaderSkeleton />
-                  <CardGridSkeleton variant="landscape" count={5} />
+                  <div className="min-h-[160px]">
+                    <CardGridSkeleton variant="landscape" count={5} />
+                  </div>
                 </div>
               }
             >
@@ -116,7 +97,9 @@ export default function DashboardPage() {
               fallback={
                 <div className="flex flex-col gap-4">
                   <SectionHeaderSkeleton />
-                  <CardGridSkeleton variant="landscape" count={5} />
+                  <div className="min-h-[160px]">
+                    <CardGridSkeleton variant="landscape" count={5} />
+                  </div>
                 </div>
               }
             >
