@@ -45,9 +45,10 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
     }
 
     const data = (await response.json()) as TraktTokenResponse;
-    const cookieStore = await cookies();
 
     try {
+      const cookieStore = await cookies();
+
       // Tokens are persisted in cookies for subsequent server-side requests
       cookieStore.set("trakt_access_token", data.access_token, {
         httpOnly: true,
@@ -102,8 +103,18 @@ export function createTraktClient(
           accessToken = accessToken || cookieStore.get("trakt_access_token")?.value;
           refreshToken = refreshToken || cookieStore.get("trakt_refresh_token")?.value;
         } catch (e) {
-          // Context might be static or cookies not accessible
+          console.warn("[Trakt API] Warning: Unable to access cookies in this context.");
         }
+      }
+
+      // Check if the endpoint requires user authentication
+      const isPrivateEndpoint =
+        url.toString().includes("/users/me") || url.toString().includes("/sync");
+
+      if (isPrivateEndpoint && !accessToken) {
+        throw new Error(
+          `TRAKT_OAUTH_REQUIRED: The endpoint ${url} requires an access token, but none was found in parameters or cookies.`,
+        );
       }
 
       /**
@@ -154,7 +165,7 @@ export function createTraktClient(
 
         if (response.status === 403) {
           throw new Error(
-            "TRAKT_FORBIDDEN: Access denied. Check your API Key permissions or endpoint validity.",
+            "TRAKT_FORBIDDEN: Access denied. Check your API Key permissions, token scope, or endpoint validity.",
           );
         }
 

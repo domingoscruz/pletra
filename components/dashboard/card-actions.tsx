@@ -5,10 +5,11 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-// Global cache promise to prevent 429 errors from multiple components rendering at once
+// --- Exported Utilities & Constants ---
+
 let sharedWatchlistPromise: Promise<number[]> | null = null;
 
-const fetchWatchlistIds = () => {
+export const fetchWatchlistIds = () => {
   if (!sharedWatchlistPromise) {
     const timestamp = Date.now();
     sharedWatchlistPromise = fetch(`/api/trakt/sync/watchlist?_t=${timestamp}`, {
@@ -32,7 +33,7 @@ const fetchWatchlistIds = () => {
   return sharedWatchlistPromise;
 };
 
-const TRAKT_RATINGS: Record<number, string> = {
+export const TRAKT_RATINGS: Record<number, string> = {
   1: "1/10 Weak sauce :(",
   2: "2/10 Terrible",
   3: "3/10 Bad",
@@ -44,6 +45,42 @@ const TRAKT_RATINGS: Record<number, string> = {
   9: "9/10 Superb",
   10: "10/10 Totally Ninja!",
 };
+
+export interface SyncPayload {
+  type: "movies" | "shows" | "episodes";
+  ids: Record<string, any>;
+  action: "add" | "remove";
+  date?: string;
+  rating?: number;
+}
+
+export const syncTraktData = async (
+  payload: SyncPayload,
+  category: "history" | "watchlist" | "ratings",
+) => {
+  const isRemove = payload.action === "remove";
+  const endpoint = `/api/trakt/sync/${category}${isRemove ? "/remove" : ""}`;
+
+  const body: any = {
+    [payload.type]: [
+      {
+        ids: payload.ids,
+        ...(payload.date && { watched_at: payload.date }),
+        ...(payload.rating !== undefined && { rating: payload.rating }),
+      },
+    ],
+  };
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  return response.ok;
+};
+
+// --- Component ---
 
 interface CardActionsProps {
   mediaType: "movies" | "shows" | "episodes";
@@ -74,8 +111,10 @@ export function CardActions({
   const [showListOptions, setShowListOptions] = useState(false);
   const [showAddAnotherPlay, setShowAddAnotherPlay] = useState(false);
 
-  const [customDate, setCustomDate] = useState("");
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
 
+  const [customDate, setCustomDate] = useState("");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -97,7 +136,6 @@ export function CardActions({
   const targetIds = episodeIds ? episodeIds : ids;
   const traktId = targetIds?.trakt ? Number(targetIds.trakt) : null;
 
-  // Formats the release date for display
   const formattedReleaseDate = releasedAt
     ? new Date(releasedAt)
         .toLocaleDateString("en-US", {
@@ -116,7 +154,6 @@ export function CardActions({
     }
   }, [traktId]);
 
-  // Reset internal states if the card's ID changes
   useEffect(() => {
     setWatched(isWatched);
     setShowWatchOptions(false);
@@ -128,73 +165,69 @@ export function CardActions({
     if (isInWatchlist) setInWatchlist(true);
   }, [traktId, isWatched, userRating, isInWatchlist]);
 
+  const handleMouseEnterTooltip = (e: React.MouseEvent, text: string) => {
+    if (showWatchOptions || showListOptions || showRating) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltipPos({
+      top: rect.top - 30,
+      left: rect.left + rect.width / 2,
+    });
+    setActiveTooltip(text);
+  };
+
   const handleWatchlistAction = async (action: "add" | "remove") => {
     if (isLoading || !traktId) return;
     setIsLoading(true);
-    const isAdding = action === "add";
-    const type = episodeIds ? "episodes" : mediaType;
-    const endpoint = isAdding ? "/api/trakt/sync/watchlist" : "/api/trakt/sync/watchlist/remove";
-    const payloadIds = { trakt: traktId };
-    setInWatchlist(isAdding);
+    setInWatchlist(action === "add");
 
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [type]: [{ ids: payloadIds }] }),
-      });
-      if (res.ok) {
-        setToastMessage(isAdding ? "Added to Watchlist!" : "Removed from Watchlist!");
-        setShowListOptions(false);
-        router.refresh();
-      } else {
-        setInWatchlist(!isAdding);
-      }
-    } finally {
-      setIsLoading(false);
-      setTimeout(() => setToastMessage(null), 2500);
+    const success = await syncTraktData(
+      {
+        type: episodeIds ? "episodes" : mediaType,
+        ids: { trakt: traktId },
+        action,
+      },
+      "watchlist",
+    );
+
+    if (success) {
+      setToastMessage(action === "add" ? "Added to Watchlist!" : "Removed from Watchlist!");
+      setShowListOptions(false);
+      router.refresh();
+    } else {
+      setInWatchlist(action !== "add");
     }
+
+    setIsLoading(false);
+    setTimeout(() => setToastMessage(null), 2500);
   };
 
   const handleWatchAction = async (action: "add" | "remove", dateString?: string) => {
     if (isLoading || !traktId) return;
     setIsLoading(true);
-    const isAdding = action === "add";
-    setWatched(isAdding);
+    setWatched(action === "add");
     setShowWatchOptions(false);
     setShowAddAnotherPlay(false);
 
-    const endpoint = isAdding ? "/api/trakt/sync/history" : "/api/trakt/sync/history/remove";
+    const success = await syncTraktData(
+      {
+        type: episodeIds ? "episodes" : mediaType,
+        ids: targetIds,
+        action,
+        date: dateString,
+      },
+      "history",
+    );
 
-    // STRICT TYPE MAPPING: Only use "episodes" if episodeIds are explicitly passed
-    const targetType = episodeIds ? "episodes" : mediaType;
-    const targetIdsObj = episodeIds ? episodeIds : ids;
-
-    const itemPayload: any = { ids: targetIdsObj };
-    if (isAdding && dateString) {
-      itemPayload.watched_at = dateString;
+    if (success) {
+      setToastMessage(action === "add" ? "History Updated!" : "History Removed!");
+      router.refresh();
+    } else {
+      setWatched(action !== "add");
+      setToastMessage("Failed to update history.");
     }
 
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [targetType]: [itemPayload] }),
-      });
-      if (res.ok) {
-        setToastMessage(isAdding ? "History Updated!" : "History Removed!");
-        router.refresh();
-      } else {
-        setWatched(!isAdding);
-        setToastMessage("Failed to update history.");
-      }
-    } catch (e) {
-      setWatched(!isAdding);
-      setToastMessage("Network error occurred.");
-    } finally {
-      setIsLoading(false);
-      setTimeout(() => setToastMessage(null), 2500);
-    }
+    setIsLoading(false);
+    setTimeout(() => setToastMessage(null), 2500);
   };
 
   const handleCheckin = async () => {
@@ -230,39 +263,31 @@ export function CardActions({
     setIsLoading(true);
     const isRemoving = val === 0;
 
-    // Optimistic UI updates - happens immediately before network request
     setLocalRating(isRemoving ? undefined : val);
-    onRate?.(val); // Always notify parent, even on removal (val = 0)
+    onRate?.(val);
     setShowRating(false);
 
-    const type = episodeIds ? "episodes" : mediaType;
-    const endpoint = isRemoving ? "/api/trakt/sync/ratings/remove" : "/api/trakt/sync/ratings";
+    const success = await syncTraktData(
+      {
+        type: episodeIds ? "episodes" : mediaType,
+        ids: { trakt: traktId },
+        action: isRemoving ? "remove" : "add",
+        rating: val,
+      },
+      "ratings",
+    );
 
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [type]: [{ ids: { trakt: traktId }, rating: val }] }),
-      });
-
-      if (res.ok) {
-        router.refresh();
-        setToastMessage(isRemoving ? "Rating Removed!" : "Rated!");
-      } else {
-        // Rollback state if the API fails
-        setLocalRating(userRating && userRating > 0 ? userRating : undefined);
-        onRate?.(userRating ?? 0);
-        setToastMessage("Failed to update rating.");
-      }
-    } catch (e) {
-      // Rollback state on network error
+    if (success) {
+      router.refresh();
+      setToastMessage(isRemoving ? "Rating Removed!" : "Rated!");
+    } else {
       setLocalRating(userRating && userRating > 0 ? userRating : undefined);
       onRate?.(userRating ?? 0);
-      setToastMessage("Network error occurred.");
-    } finally {
-      setIsLoading(false);
-      setTimeout(() => setToastMessage(null), 2500);
+      setToastMessage("Failed to update rating.");
     }
+
+    setIsLoading(false);
+    setTimeout(() => setToastMessage(null), 2500);
   };
 
   useEffect(() => {
@@ -333,39 +358,28 @@ export function CardActions({
                     >
                       {isLoading ? "Syncing..." : "Check-in (Watching Now)"}
                     </button>
-
                     <button
                       onClick={() => handleWatchAction("add", new Date().toISOString())}
                       className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
                     >
                       Just Watched
                     </button>
-
-                    {/* STRICT RELEASE DATE BUTTON - NO SILENT FALLBACKS */}
                     <button
-                      onClick={() => {
-                        if (!releasedAt) {
-                          // Displays error directly so you know the mapper in this section failed
-                          setToastMessage("Error: Missing release date metadata");
-                          setTimeout(() => setToastMessage(null), 3000);
-                          return;
-                        }
-                        // If date exists, parse directly to ISO
-                        const exactReleaseDate = new Date(releasedAt).toISOString();
-                        handleWatchAction("add", exactReleaseDate);
-                      }}
+                      onClick={() =>
+                        releasedAt
+                          ? handleWatchAction("add", new Date(releasedAt).toISOString())
+                          : null
+                      }
                       className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
                     >
                       Release Date {formattedReleaseDate ? `(${formattedReleaseDate})` : ""}
                     </button>
-
                     <button
                       onClick={() => handleWatchAction("add", "1970-01-01T00:00:00.000Z")}
                       className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
                     >
                       Unknown Date
                     </button>
-
                     <div className="mt-1 border-t border-zinc-800 pt-3">
                       <p className="text-[9px] font-black text-zinc-500 uppercase mb-2 text-center">
                         Custom Date
@@ -492,14 +506,26 @@ export function CardActions({
     );
   };
 
-  const isListButtonLit = inWatchlist;
-
   return (
     <div
       ref={triggerRef}
       className="relative flex w-full items-center justify-between bg-zinc-900/50 rounded-b-lg overflow-visible px-0"
     >
       {renderPortalContent()}
+
+      {activeTooltip &&
+        !(showWatchOptions || showListOptions || showRating) &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[11000] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-100"
+            style={{ top: `${tooltipPos.top}px`, left: `${tooltipPos.left}px` }}
+          >
+            {activeTooltip}
+            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+          </div>,
+          document.body,
+        )}
+
       {toastMessage &&
         createPortal(
           <div className="fixed bottom-6 left-6 z-[10000] rounded-lg bg-zinc-900 border border-white/10 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl animate-in slide-in-from-left-4">
@@ -510,6 +536,8 @@ export function CardActions({
 
       <div className="flex shrink-0">
         <button
+          onMouseEnter={(e) => handleMouseEnterTooltip(e, watched ? "Watched" : "Check-in")}
+          onMouseLeave={() => setActiveTooltip(null)}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -533,6 +561,8 @@ export function CardActions({
           </svg>
         </button>
         <button
+          onMouseEnter={(e) => handleMouseEnterTooltip(e, "Watchlist")}
+          onMouseLeave={() => setActiveTooltip(null)}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -542,7 +572,7 @@ export function CardActions({
           }}
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all border-l border-white/10",
-            isListButtonLit
+            inWatchlist
               ? "bg-[#23a5dd] text-white"
               : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
           )}
@@ -556,6 +586,10 @@ export function CardActions({
       <div className="flex-1" />
 
       <button
+        onMouseEnter={(e) =>
+          handleMouseEnterTooltip(e, localRating ? `Rating: ${localRating}` : "Rate")
+        }
+        onMouseLeave={() => setActiveTooltip(null)}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

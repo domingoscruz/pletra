@@ -7,7 +7,11 @@ import { CardImage } from "./card-image";
 import { CardActions } from "./card-actions";
 import { cn } from "@/lib/utils";
 
-const RIBBON_COLORS: Record<number, string> = {
+/**
+ * Colors for the rating ribbon based on the user's score.
+ * Exported to be reused in other progress-related components.
+ */
+export const RIBBON_COLORS: Record<number, string> = {
   10: "#ed1c24",
   9: "#df252e",
   8: "#d22f37",
@@ -20,7 +24,11 @@ const RIBBON_COLORS: Record<number, string> = {
   1: "#71717a",
 };
 
-const SPECIAL_TAG_COLORS: Record<string, string> = {
+/**
+ * Colors for special event tags.
+ * Exported to maintain consistency across the UI.
+ */
+export const SPECIAL_TAG_COLORS: Record<string, string> = {
   "Series Premiere": "bg-[#27B7F5]",
   "Season Premiere": "bg-[#45b449]",
   "Season Finale": "bg-[#9810fa]",
@@ -59,16 +67,21 @@ export interface MediaCardProps {
   isWatched?: boolean;
   isInWatchlist?: boolean;
   priority?: boolean;
-  /**
-   * If true, enables the automatic "New Episode" badge
-   * for content released within the last 48 hours.
-   */
   showNewBadge?: boolean;
 }
 
 /**
- * MediaCard component for displaying movies and shows.
- * Includes logic to calculate watch progress and display relative badges.
+ * Helper to get ribbon color based on rating.
+ * Exported for use in components like progress-client.
+ */
+export const getRibbonColor = (val: number): string => {
+  const score = Math.floor(val);
+  return RIBBON_COLORS[score] || "#3f3f46";
+};
+
+/**
+ * MediaCard component for the Pletra project.
+ * Displays media items with custom ribbons, badges, and interactive actions.
  */
 export function MediaCard({
   title,
@@ -135,9 +148,6 @@ export function MediaCard({
     setOptimisticRating(getNormalizedRating(userRating));
   }, [userRating]);
 
-  /**
-   * Checks if the content is a new release (within 48 hours).
-   */
   const checkIsNewRelease = () => {
     if (!showNewBadge || !releasedAt || mediaType === "movies") return false;
     const releaseDate = new Date(releasedAt).getTime();
@@ -171,12 +181,6 @@ export function MediaCard({
     }, 2000);
   };
 
-  /**
-   * Progress Calculation Logic:
-   * To prevent a "false 100%" on long series, we only allow 100%
-   * if completed matches or exceeds aired episodes.
-   * Otherwise, we cap it at 99% using Math.floor.
-   */
   const airedCount = totalAired ?? progress?.aired ?? 0;
   const completedCount = progress?.completed ?? 0;
 
@@ -194,9 +198,8 @@ export function MediaCard({
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
 
   const isTopTag = specialTag && specialTag !== "New Episode";
-  const ribbonColor = optimisticRating
-    ? RIBBON_COLORS[Math.floor(optimisticRating)]
-    : "transparent";
+
+  const ribbonColor = optimisticRating ? getRibbonColor(optimisticRating) : "transparent";
 
   return (
     <div className="group relative flex w-full flex-col antialiased animate-in fade-in duration-300">
@@ -235,8 +238,7 @@ export function MediaCard({
 
             <div
               className={cn(
-                "absolute left-2 z-20 flex items-center gap-1.5 pointer-events-none transition-all duration-200",
-                isTopTag ? "top-7" : "top-2",
+                "absolute top-2 left-2 z-40 flex items-center gap-1.5 pointer-events-none transition-all duration-200",
               )}
             >
               {timeBadge && (
@@ -264,17 +266,28 @@ export function MediaCard({
 
             {mounted && showInlineActions && optimisticRating && optimisticRating > 0 && (
               <div
-                className="absolute right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
+                className="absolute top-0 right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
                 style={{
-                  top: isTopTag ? "20px" : "0",
-                  borderTop: "38px solid",
-                  borderLeft: "38px solid transparent",
+                  borderTopWidth: "32px",
+                  borderTopStyle: "solid",
                   borderTopColor: ribbonColor,
+                  borderLeftWidth: "32px",
+                  borderLeftStyle: "solid",
+                  borderLeftColor: "transparent",
                 }}
               >
                 <span
                   className="absolute font-black text-white tabular-nums"
-                  style={{ top: "-34px", left: "-16px", fontSize: "10px" }}
+                  style={{
+                    top: "-28px",
+                    left: "-22px",
+                    width: "24px",
+                    textAlign: "center",
+                    fontSize: "12px",
+                    lineHeight: "1",
+                    transform: "rotate(45deg)",
+                    textShadow: "0px 1px 2px rgba(0,0,0,0.5)",
+                  }}
                 >
                   {optimisticRating}
                 </span>

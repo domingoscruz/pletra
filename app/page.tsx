@@ -10,6 +10,9 @@ import { FriendsActivity } from "@/components/dashboard/friends-activity";
 import { ProfileBackdrop } from "@/components/dashboard/profile-backdrop";
 import { CardGridSkeleton } from "@/components/dashboard/media-card-skeleton";
 
+/**
+ * Skeleton component for section headers to maintain layout stability during loading
+ */
 function SectionHeaderSkeleton() {
   return (
     <div className="mb-4 flex items-center gap-3">
@@ -19,6 +22,9 @@ function SectionHeaderSkeleton() {
   );
 }
 
+/**
+ * Skeleton component for the profile backdrop area
+ */
 function ProfileBackdropSkeleton() {
   return <div className="relative h-[40vh] w-full animate-pulse bg-zinc-900/40 lg:h-[50vh]" />;
 }
@@ -30,7 +36,11 @@ export default function DashboardPage() {
         <ProfileBackdrop />
       </Suspense>
 
-      <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-20 pt-4 md:space-y-12 md:pt-6 lg:px-8">
+      {/*
+          Main content container with added opacity and backdrop blur 
+          for better text readability over the profile backdrop 
+      */}
+      <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-20 pt-4 md:space-y-12 md:pt-6 lg:px-8 bg-black/40 backdrop-blur-md rounded-2xl">
         <section className="w-full overflow-hidden">
           <Suspense
             fallback={

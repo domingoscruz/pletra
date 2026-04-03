@@ -4,57 +4,53 @@ import { cache } from "react";
 import { auth } from "@/lib/auth";
 import { createTraktClient, type TraktClient } from "./trakt";
 
-/**
- * Resolve the Trakt access token once per request.
- * Wrapped in React.cache to ensure that every Server Component sharing
- * the same request uses the same promise.
- */
-const getAccessToken = cache(async (): Promise<string | null> => {
+interface TraktTokens {
+  accessToken: string | null;
+  refreshToken: string | null;
+}
+
+const getTraktTokens = cache(async (): Promise<TraktTokens> => {
   const requestHeaders = await headers();
 
   const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) return null;
+  if (!session) {
+    return { accessToken: null, refreshToken: null };
+  }
 
   const tokenResponse = await auth.api.getAccessToken({
     headers: requestHeaders,
     body: { providerId: "trakt" },
   });
 
-  return tokenResponse?.accessToken ?? null;
+  return {
+    accessToken: tokenResponse?.accessToken ?? null,
+    // Safely attempt to extract refreshToken if the auth provider exposes it
+    refreshToken: (tokenResponse as any)?.refreshToken ?? null,
+  };
 });
 
-/**
- * Returns an authenticated Trakt client for the current request.
- * Automatically redirects to the login page if no valid session is found.
- */
 export async function getAuthenticatedTraktClient(): Promise<TraktClient> {
-  const accessToken = await getAccessToken();
+  const { accessToken, refreshToken } = await getTraktTokens();
 
   if (!accessToken) {
     redirect("/auth/login");
   }
 
-  return createTraktClient(accessToken);
+  return createTraktClient(accessToken, refreshToken ?? undefined);
 }
 
-/**
- * Returns an authenticated Trakt client if a session exists,
- * or an unauthenticated client for public endpoints.
- */
 export async function getOptionalTraktClient(): Promise<TraktClient> {
-  const accessToken = await getAccessToken();
-  return createTraktClient(accessToken ?? undefined);
+  const { accessToken, refreshToken } = await getTraktTokens();
+
+  return createTraktClient(accessToken ?? undefined, refreshToken ?? undefined);
 }
 
-/**
- * Returns identifiers for the current authenticated user.
- * Includes the username and the Trakt slug.
- */
 export const getCurrentUser = cache(
   async (): Promise<{ username: string; slug: string } | null> => {
     try {
       const requestHeaders = await headers();
       const session = await auth.api.getSession({ headers: requestHeaders });
+
       if (!session?.user) return null;
 
       const email = session.user.email ?? "";
@@ -62,6 +58,7 @@ export const getCurrentUser = cache(
       const slug = session.user.id ?? "";
 
       if (!username && !slug) return null;
+
       return {
         username: username || slug,
         slug: slug || username,
@@ -72,9 +69,6 @@ export const getCurrentUser = cache(
   },
 );
 
-/**
- * Checks if a given profile slug belongs to the currently authenticated user.
- */
 export async function isCurrentUser(profileSlug: string): Promise<boolean> {
   const user = await getCurrentUser();
   if (!user) return false;

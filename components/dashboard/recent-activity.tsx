@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
- * Universal extractor for Trakt's image format in Server Components.
+ * Universal extractor for Trakt's image format.
  * Handles strings, arrays, and prepends https if missing.
  */
 function extractTraktImage(
@@ -36,16 +36,24 @@ function extractTraktImage(
   return null;
 }
 
+interface EpisodeMetadata {
+  releasedAt?: string;
+  rating?: number;
+  totalEpisodesInSeason: number;
+  isLastSeason: boolean;
+}
+
 /**
  * RecentActivity component fetches and displays the user's latest
- * watched episodes and movies from Trakt history.
+ * watched episodes and movies from Trakt history, including special tags.
+ * This is a Server Component.
  */
 export async function RecentActivity() {
   const client = await getAuthenticatedTraktClient();
 
   if (!client) return null;
 
-  // 1. Fetch base history for shows and movies with extended images
+  // Fetch history and ratings in parallel
   const [showRes, movieRes, epRatingsRes, movieRatingsRes] = await Promise.all([
     client.users.history.shows({
       params: { id: "me" },
@@ -62,11 +70,11 @@ export async function RecentActivity() {
   const showHistory = showRes.status === 200 ? showRes.body : [];
   const movieHistory = movieRes.status === 200 ? movieRes.body : [];
 
-  // 2. Metadata Extraction for Episodes
   const uniqueShowSlugs = Array.from(
     new Set((showHistory as any[]).map((item) => item.show?.ids?.slug).filter(Boolean)),
   );
 
+  // Fetch season data to determine premieres and finales
   const seasonsData = await Promise.all(
     uniqueShowSlugs.map((slug) =>
       client.shows
@@ -78,17 +86,27 @@ export async function RecentActivity() {
     ),
   );
 
-  const episodeMetadataMap = new Map<number, { releasedAt?: string; rating?: number }>();
+  const episodeMetadataMap = new Map<number, EpisodeMetadata>();
 
   seasonsData.forEach((res) => {
     if (res?.status === 200 && Array.isArray(res.body)) {
-      res.body.forEach((season: any) => {
+      const seasons = res.body.filter((s: any) => s.number > 0);
+      if (seasons.length === 0) return;
+
+      const lastSeasonNumber = Math.max(...seasons.map((s: any) => s.number));
+
+      seasons.forEach((season: any) => {
         if (season.episodes) {
+          const totalEpisodes = season.episodes.length;
+          const isLastSeason = season.number === lastSeasonNumber;
+
           season.episodes.forEach((ep: any) => {
             if (ep.ids?.trakt) {
               episodeMetadataMap.set(ep.ids.trakt, {
                 releasedAt: ep.first_aired,
                 rating: ep.rating,
+                totalEpisodesInSeason: totalEpisodes,
+                isLastSeason,
               });
             }
           });
@@ -126,7 +144,6 @@ export async function RecentActivity() {
 
   if (allHistory.length === 0) return null;
 
-  // 3. Process items and fetch images with prioritized fallback logic
   const items = await Promise.all(
     allHistory.map(async (item) => {
       const isEpisode = item.type === "episode";
@@ -135,8 +152,6 @@ export async function RecentActivity() {
       let finalImageUrl: string | null = null;
 
       if (isEpisode) {
-        // --- EPISODE IMAGE RESOLUTION ---
-        // 1. TMDB Episode Still
         if (tmdbId) {
           const epImgs = await fetchTmdbImages(
             tmdbId,
@@ -146,31 +161,21 @@ export async function RecentActivity() {
           ).catch(() => null);
           finalImageUrl = epImgs?.still || null;
         }
-
-        // 2. Trakt Episode Screenshot/Thumb
         if (!finalImageUrl) {
           finalImageUrl = extractTraktImage(item.episode, ["screenshot", "thumb"]);
         }
-
-        // 3. TMDB Show Backdrop
         if (!finalImageUrl && tmdbId) {
           const showImgs = await fetchTmdbImages(tmdbId, "tv").catch(() => null);
           finalImageUrl = showImgs?.backdrop || showImgs?.poster || null;
         }
-
-        // 4. Trakt Show Fanart
         if (!finalImageUrl) {
           finalImageUrl = extractTraktImage(item.show, ["fanart", "poster"]);
         }
       } else {
-        // --- MOVIE IMAGE RESOLUTION ---
-        // 1. TMDB Movie Backdrop
         if (tmdbId) {
           const movieImgs = await fetchTmdbImages(tmdbId, "movie").catch(() => null);
           finalImageUrl = movieImgs?.backdrop || movieImgs?.poster || null;
         }
-
-        // 2. Trakt Movie Fanart/Poster
         if (!finalImageUrl) {
           finalImageUrl = extractTraktImage(item.movie, ["fanart", "poster"]);
         }
@@ -181,7 +186,23 @@ export async function RecentActivity() {
         ? `${item.episode?.season}x${String(item.episode?.number).padStart(2, "0")}`
         : "";
 
-      const episodeMetadata = isEpisode ? episodeMetadataMap.get(item.episode?.ids?.trakt) : null;
+      const metadata = isEpisode ? episodeMetadataMap.get(item.episode?.ids?.trakt) : null;
+
+      let specialTag: any = undefined;
+      if (isEpisode && metadata) {
+        const { season, number } = item.episode;
+        const { totalEpisodesInSeason, isLastSeason } = metadata;
+
+        if (season === 1 && number === 1) {
+          specialTag = "Series Premiere";
+        } else if (number === 1) {
+          specialTag = "Season Premiere";
+        } else if (isLastSeason && number === totalEpisodesInSeason) {
+          specialTag = "Series Finale";
+        } else if (number === totalEpisodesInSeason) {
+          specialTag = "Season Finale";
+        }
+      }
 
       return {
         keyId: isEpisode
@@ -198,18 +219,19 @@ export async function RecentActivity() {
           : `/movies/${item.movie?.ids?.slug}`,
         showHref: isEpisode ? `/shows/${item.show?.ids?.slug}` : undefined,
         backdropUrl: finalImageUrl,
-        rating: isEpisode ? episodeMetadata?.rating : item.movie?.rating,
+        rating: isEpisode ? metadata?.rating : item.movie?.rating,
         userRating: isEpisode
           ? epRatingMap.get(item.episode?.ids?.trakt)
           : movieRatingMap.get(item.movie?.ids?.trakt),
         mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
         ids: isEpisode ? (item.show?.ids ?? {}) : (item.movie?.ids ?? {}),
         episodeIds: isEpisode ? (item.episode?.ids ?? {}) : undefined,
-        releasedAt: isEpisode ? episodeMetadata?.releasedAt : item.movie?.released,
-        watched_at: item.watched_at,
+        releasedAt: isEpisode ? metadata?.releasedAt : item.movie?.released,
+        watchedAt: item.watched_at,
         showInlineActions: true,
         isWatched: true,
         variant: "landscape" as const,
+        specialTag,
       };
     }),
   );
@@ -247,10 +269,11 @@ export async function RecentActivity() {
             ids={item.ids}
             episodeIds={item.episodeIds}
             releasedAt={item.releasedAt as string}
-            timeBadge={formatTimeAgo(item.watched_at)}
+            timeBadge={formatTimeAgo(item.watchedAt)}
             isWatched={item.isWatched}
             showInlineActions={item.showInlineActions}
             variant={item.variant}
+            specialTag={item.specialTag}
           />
         ))}
       </CardGrid>
