@@ -1,5 +1,4 @@
 import { traktApi, Environment } from "@trakt/api";
-import { cookies } from "next/headers";
 import { ApiRequestError, getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
 
 export type TraktClient = ReturnType<typeof traktApi>;
@@ -13,9 +12,7 @@ interface TraktTokenResponse {
   created_at: number;
 }
 
-/**
- * Refreshes the Trakt OAuth token using the refresh_token.
- */
+// Refreshes a Trakt OAuth token for the current request only.
 async function refreshTraktToken(refreshToken: string): Promise<string | null> {
   const clientId = process.env.TRAKT_CLIENT_ID;
   const clientSecret = process.env.TRAKT_CLIENT_SECRET;
@@ -53,27 +50,6 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
     }
 
     const data = (await response.json()) as TraktTokenResponse;
-
-    try {
-      const cookieStore = await cookies();
-
-      cookieStore.set("trakt_access_token", data.access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: data.expires_in,
-      });
-
-      cookieStore.set("trakt_refresh_token", data.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 90, // 90 days
-      });
-    } catch {
-      // Silently fail if cookies cannot be set in this context
-    }
-
     return data.access_token;
   } catch (error) {
     console.error("[Trakt Auth] Refresh exception:", error);
@@ -98,27 +74,13 @@ export function createTraktClient(
     environment: Environment.production,
     apiKey: clientId || "",
     fetch: async (url, init) => {
-      let accessToken = providedAccessToken;
-      let refreshToken = providedRefreshToken;
-
-      // Only attempt to access cookies if tokens are not provided
-      if (!accessToken || !refreshToken) {
-        try {
-          const cookieStore = await cookies();
-          accessToken = accessToken || cookieStore.get("trakt_access_token")?.value;
-          refreshToken = refreshToken || cookieStore.get("trakt_refresh_token")?.value;
-        } catch {
-          // Silently fail if cookies are inaccessible (e.g., static rendering context)
-        }
-      }
-
       const urlString = url.toString();
       const isPrivateEndpoint =
         urlString.includes("/users/me") ||
         urlString.includes("/sync") ||
         urlString.includes("/checkin");
 
-      if (isPrivateEndpoint && !accessToken) {
+      if (isPrivateEndpoint && !providedAccessToken) {
         throw new Error(`TRAKT_OAUTH_REQUIRED: ${urlString} requires authentication.`);
       }
 
@@ -150,11 +112,11 @@ export function createTraktClient(
           },
         );
 
-      let response = await executeRequest(accessToken);
+      let response = await executeRequest(providedAccessToken);
 
       // Handle 401 Unauthorized by attempting a token refresh
-      if (response.status === 401 && refreshToken) {
-        const newAccessToken = await refreshTraktToken(refreshToken);
+      if (response.status === 401 && providedRefreshToken) {
+        const newAccessToken = await refreshTraktToken(providedRefreshToken);
 
         if (newAccessToken) {
           response = await executeRequest(newAccessToken);

@@ -92,7 +92,7 @@ interface ProgressClientProps {
   activeSort: string;
   activeFilter: string;
   activeSearch: string;
-  activeBarMode: "smart" | "simple";
+  activeBarMode: "smart";
   currentPage: number;
   totalPages: number;
   totalItems: number;
@@ -180,7 +180,12 @@ const ProgressBar = ({
   aired: number;
   completed: number;
   mode?: ProgressBarMode;
-  segments?: { aired: number; completed: number; label?: string }[];
+  segments?: {
+    aired: number;
+    completed: number;
+    label?: string;
+    watchedCells?: boolean[];
+  }[];
   cells?: { filled: boolean; label?: string }[];
   size?: "default" | "compact";
 }) => {
@@ -257,15 +262,14 @@ const ProgressBar = ({
         >
           {segments.map((segment, index) => {
             const width = `${(segment.aired / aired) * 100}%`;
-            const fillWidth =
-              segment.aired > 0
-                ? `${Math.min(100, (segment.completed / segment.aired) * 100)}%`
-                : "0%";
+            const watchedCells = segment.watchedCells ?? [];
+            const hasWatchedCells = watchedCells.length > 0;
+            const cellWidth = hasWatchedCells ? 100 / watchedCells.length : 0;
 
             return (
               <div
                 key={`${index}-${segment.aired}-${segment.completed}`}
-                className="relative h-full bg-[#4a145d]"
+                className="relative h-full overflow-hidden bg-[#4a145d]"
                 style={{ width }}
                 onMouseEnter={(event) => {
                   if (!segment.label) return;
@@ -278,10 +282,30 @@ const ProgressBar = ({
                 }}
                 onMouseLeave={() => setHoveredSegment(null)}
               >
-                <div
-                  className="h-full bg-[#c27ae8] transition-all duration-500"
-                  style={{ width: fillWidth }}
-                />
+                {hasWatchedCells ? (
+                  watchedCells.map((filled, cellIndex) =>
+                    filled ? (
+                      <div
+                        key={`${cellIndex}-${segment.label ?? "segment-cell"}`}
+                        className="absolute top-0 bottom-0 bg-[#c27ae8]"
+                        style={{
+                          left: `${cellWidth * cellIndex}%`,
+                          width: `max(${cellWidth}%, 2px)`,
+                        }}
+                      />
+                    ) : null,
+                  )
+                ) : (
+                  <div
+                    className="h-full bg-[#c27ae8] transition-all duration-500"
+                    style={{
+                      width:
+                        segment.aired > 0
+                          ? `${Math.min(100, (segment.completed / segment.aired) * 100)}%`
+                          : "0%",
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -528,26 +552,54 @@ function SeasonProgressRow({
   onToggle: () => void;
   barMode: ProgressBarMode;
 }) {
+  const seasonPageButtonRef = useRef<HTMLAnchorElement>(null);
+  const [isSeasonPageHovered, setIsSeasonPageHovered] = useState(false);
   const percentage = getProgressPercentage(season.aired, season.completed);
 
   return (
     <div className="border-t border-white/5 pt-2.5 first:border-t-0 first:pt-0">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-start gap-3 text-left transition-colors hover:text-white"
-      >
-        <span className="shrink-0 text-[13px] font-bold text-white md:text-[14px]">
-          {isExpanded ? "-" : "+"} Season {season.season}
-          {season.year ? `: ${season.year}` : ""}
-        </span>
-        <span className="min-w-0 flex-1 pt-0.5 text-right text-[11px] text-white/60">
-          {formatSeasonSummary(season)}
-        </span>
-        <span className="w-14 shrink-0 text-right text-[16px] font-black leading-none text-white md:text-[17px]">
-          {percentage}%
-        </span>
-      </button>
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-start gap-3 text-left transition-colors hover:text-white"
+        >
+          <span className="shrink-0">
+            <span className="inline-flex items-center gap-1.5 text-[13px] font-bold text-white md:text-[14px]">
+              <span>
+                {isExpanded ? "-" : "+"} Season {season.season}
+                {season.year ? `: ${season.year}` : ""}
+              </span>
+              <Link
+                ref={seasonPageButtonRef}
+                href={`/shows/${showSlug}/seasons/${season.season}`}
+                onClick={(event) => event.stopPropagation()}
+                onMouseEnter={() => setIsSeasonPageHovered(true)}
+                onMouseLeave={() => setIsSeasonPageHovered(false)}
+                className="shrink-0 text-zinc-300 transition-colors hover:text-white"
+                aria-label={`Season ${season.season} page`}
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.2}
+                  viewBox="0 0 24 24"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m10 8 4 4-4 4" />
+                </svg>
+              </Link>
+            </span>
+          </span>
+          <span className="min-w-0 flex-1 pt-0.5 text-right text-[11px] text-white/60">
+            {formatSeasonSummary(season)}
+          </span>
+          <span className="w-14 shrink-0 text-right text-[16px] font-black leading-none text-white md:text-[17px]">
+            {percentage}%
+          </span>
+        </button>
+      </div>
 
       <div className="mt-1.5">
         <ProgressBar
@@ -561,6 +613,12 @@ function SeasonProgressRow({
           size="compact"
         />
       </div>
+
+      <ActionTooltip
+        label={`Season ${season.season} page`}
+        isOpen={isSeasonPageHovered}
+        triggerRef={seasonPageButtonRef}
+      />
 
       {isExpanded && (
         <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-white/5 pt-2.5">
@@ -717,7 +775,7 @@ function ProgressHistoryMenu({
     if (!isOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!triggerRef.current?.contains(target) && !target.closest(".portal-menu-content")) {
+      if (!target.closest(".portal-menu-content")) {
         onClose();
       }
     };
@@ -1305,7 +1363,7 @@ const ProgressShowRow = memo(
     useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
         const target = event.target as HTMLElement;
-        if (!target.closest(".portal-menu-content") && !triggerRef.current?.contains(target)) {
+        if (!target.closest(".portal-menu-content")) {
           setActiveMenu(null);
         }
       };
@@ -1493,6 +1551,7 @@ const ProgressShowRow = memo(
                 segments={item.seasons.map((season) => ({
                   aired: season.aired,
                   completed: season.completed,
+                  watchedCells: season.episodes.map((episode) => episode.watched),
                   label: season.year
                     ? `Season ${season.season}: ${season.year}`
                     : `Season ${season.season}`,
@@ -1710,6 +1769,9 @@ const ProgressShowRow = memo(
                     setHoveredAction((current) => (current === "rating" ? null : current))
                   }
                   className="ml-auto flex min-w-[74px] items-center justify-center gap-1.5 px-4 text-[#f16161] transition-colors hover:bg-white/5"
+                  style={
+                    effectiveUserRating ? { color: getRibbonColor(effectiveUserRating) } : undefined
+                  }
                 >
                   <svg
                     className="h-4 w-4"
@@ -1862,22 +1924,15 @@ export function ProgressClient({
   );
 
   const buildUrl = useCallback(
-    (overrides: {
-      sort?: string;
-      filter?: string;
-      q?: string;
-      page?: number;
-      bar?: ProgressBarMode;
-    }) => {
+    (overrides: { sort?: string; filter?: string; q?: string; page?: number }) => {
       const params = new URLSearchParams();
       params.set("sort", overrides.sort ?? activeSort);
       params.set("filter", overrides.filter ?? activeFilter);
-      params.set("bar", overrides.bar ?? activeBarMode);
       if (overrides.q ?? activeSearch) params.set("q", overrides.q ?? activeSearch);
       if (overrides.page && overrides.page > 1) params.set("page", String(overrides.page));
       return `/users/${slug}/progress?${params.toString()}`;
     },
-    [slug, activeSort, activeFilter, activeSearch, activeBarMode],
+    [slug, activeSort, activeFilter, activeSearch],
   );
 
   const handleSearchChange = (value: string) => {
@@ -1919,17 +1974,8 @@ export function ProgressClient({
               { value: "returning", label: "Returning" },
               { value: "ended", label: "Ended / Canceled" },
               { value: "completed", label: "Completed" },
+              { value: "not-completed", label: "Not Completed" },
               { value: "dropped", label: "Dropped Shows" },
-            ]}
-          />
-          <Select
-            value={activeBarMode}
-            onChange={(value) =>
-              navigate(buildUrl({ bar: value as ProgressBarMode, page: currentPage }))
-            }
-            options={[
-              { value: "smart", label: "Smart Bar" },
-              { value: "simple", label: "Simple Bar" },
             ]}
           />
         </div>

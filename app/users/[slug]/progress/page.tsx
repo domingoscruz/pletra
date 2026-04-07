@@ -13,7 +13,6 @@ interface ProgressPageProps {
     filter?: string;
     q?: string;
     page?: string;
-    bar?: string;
   }>;
 }
 
@@ -497,7 +496,7 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
   const activeSort = sp.sort ?? "recent";
   const activeFilter = sp.filter ?? "all";
   const activeSearch = sp.q ?? "";
-  const activeBarMode = sp.bar === "simple" ? "simple" : "smart";
+  const activeBarMode = "smart" as const;
   const currentPage = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   const client = await getAuthenticatedTraktClient();
@@ -624,6 +623,8 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     );
   } else if (activeFilter === "completed") {
     items = items.filter((item) => item.completed >= item.aired && item.aired > 0);
+  } else if (activeFilter === "not-completed") {
+    items = items.filter((item) => item.aired > 0 && item.completed < item.aired);
   } else if (activeFilter === "dropped") {
     items = items.filter((item) => item.isDropped);
   }
