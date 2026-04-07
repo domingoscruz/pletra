@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, ChangeEvent, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
 import { cn } from "@/lib/utils";
 
 // --- Exported Utilities & Constants ---
@@ -12,10 +13,15 @@ let sharedWatchlistPromise: Promise<number[]> | null = null;
 export const fetchWatchlistIds = () => {
   if (!sharedWatchlistPromise) {
     const timestamp = Date.now();
-    sharedWatchlistPromise = fetch(`/api/trakt/sync/watchlist?_t=${timestamp}`, {
-      cache: "no-store",
-    })
-      .then((res) => (res.ok ? res.json() : []))
+    sharedWatchlistPromise = fetchTraktRouteJson<any[]>(
+      `/api/trakt/sync/watchlist?_t=${timestamp}`,
+      {
+        cache: "no-store",
+        timeoutMs: 10000,
+        maxRetries: 2,
+      },
+    )
+      .then((data) => data ?? [])
       .then((data): number[] => {
         if (!Array.isArray(data)) return [];
         return data
@@ -54,10 +60,15 @@ export interface SyncPayload {
   rating?: number;
 }
 
+export interface SyncResult {
+  ok: boolean;
+  message?: string;
+}
+
 export const syncTraktData = async (
   payload: SyncPayload,
   category: "history" | "watchlist" | "ratings",
-) => {
+): Promise<SyncResult> => {
   const isRemove = payload.action === "remove";
   const endpoint = `/api/trakt/sync/${category}${isRemove ? "/remove" : ""}`;
 
@@ -71,13 +82,20 @@ export const syncTraktData = async (
     ],
   };
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  return response.ok;
+  try {
+    await fetchTraktRouteJson(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      timeoutMs: 10000,
+    });
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: getErrorMessage(error, "Failed to sync with Trakt."),
+    };
+  }
 };
 
 // --- Component ---
@@ -110,11 +128,14 @@ export function CardActions({
   const [showWatchOptions, setShowWatchOptions] = useState(false);
   const [showListOptions, setShowListOptions] = useState(false);
   const [showAddAnotherPlay, setShowAddAnotherPlay] = useState(false);
+  const [showOtherDatePicker, setShowOtherDatePicker] = useState(false);
+  const [showMonthSelect, setShowMonthSelect] = useState(false);
+  const [showYearSelect, setShowYearSelect] = useState(false);
 
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
 
-  const [customDate, setCustomDate] = useState("");
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -127,24 +148,93 @@ export function CardActions({
   const [inWatchlist, setInWatchlist] = useState(isInWatchlist);
 
   const triggerRef = useRef<HTMLDivElement>(null);
+  const timeListRef = useRef<HTMLDivElement>(null);
+  const activeTimeRef = useRef<HTMLButtonElement>(null);
+  const calendarContainerRef = useRef<HTMLDivElement>(null);
+
   const [portalCoords, setPortalCoords] = useState<{
     top: number;
+    bottom: number;
     left: number;
     isMobile: boolean;
+    shouldFlip: boolean;
   } | null>(null);
 
   const targetIds = episodeIds ? episodeIds : ids;
   const traktId = targetIds?.trakt ? Number(targetIds.trakt) : null;
 
-  const formattedReleaseDate = releasedAt
-    ? new Date(releasedAt)
-        .toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-        .toUpperCase()
-    : null;
+  const months = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const years = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const range = [];
+    for (let i = currentYear; i >= 1888; i--) range.push(i);
+    return range;
+  }, []);
+
+  const getNearestQuarterHour = (date: Date) => {
+    const minutes = date.getMinutes();
+    const roundedMinutes = Math.round(minutes / 15) * 15;
+    const newDate = new Date(date);
+
+    if (roundedMinutes === 60) {
+      newDate.setHours(newDate.getHours() + 1);
+      newDate.setMinutes(0);
+    } else {
+      newDate.setMinutes(roundedMinutes);
+    }
+
+    newDate.setSeconds(0);
+    newDate.setMilliseconds(0);
+    return newDate;
+  };
+
+  const daysInMonth = useMemo(() => {
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const days = new Date(year, month + 1, 0).getDate();
+    return { firstDay, days };
+  }, [selectedDate]);
+
+  const timeOptions = useMemo(() => {
+    const times = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        times.push(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+      }
+    }
+    return times;
+  }, []);
+
+  // Center active time in the scrollable list using requestAnimationFrame for DOM accuracy
+  useEffect(() => {
+    if (showOtherDatePicker && activeTimeRef.current && timeListRef.current) {
+      const scrollTimeout = requestAnimationFrame(() => {
+        const container = timeListRef.current;
+        const element = activeTimeRef.current;
+
+        if (container && element) {
+          const centerOffset = container.clientHeight / 2 - element.clientHeight / 2;
+          container.scrollTop = element.offsetTop - container.offsetTop - centerOffset;
+        }
+      });
+      return () => cancelAnimationFrame(scrollTimeout);
+    }
+  }, [showOtherDatePicker, selectedDate]);
 
   useEffect(() => {
     if (traktId) {
@@ -158,7 +248,7 @@ export function CardActions({
     setWatched(isWatched);
     setShowWatchOptions(false);
     setShowAddAnotherPlay(false);
-    setCustomDate("");
+    setShowOtherDatePicker(false);
     if (userRating !== undefined) {
       setLocalRating(userRating && userRating > 0 ? userRating : undefined);
     }
@@ -180,7 +270,7 @@ export function CardActions({
     setIsLoading(true);
     setInWatchlist(action === "add");
 
-    const success = await syncTraktData(
+    const result = await syncTraktData(
       {
         type: episodeIds ? "episodes" : mediaType,
         ids: { trakt: traktId },
@@ -189,12 +279,13 @@ export function CardActions({
       "watchlist",
     );
 
-    if (success) {
+    if (result.ok) {
       setToastMessage(action === "add" ? "Added to Watchlist!" : "Removed from Watchlist!");
       setShowListOptions(false);
       router.refresh();
     } else {
       setInWatchlist(action !== "add");
+      setToastMessage(result.message ?? "Failed to update watchlist.");
     }
 
     setIsLoading(false);
@@ -208,7 +299,7 @@ export function CardActions({
     setShowWatchOptions(false);
     setShowAddAnotherPlay(false);
 
-    const success = await syncTraktData(
+    const result = await syncTraktData(
       {
         type: episodeIds ? "episodes" : mediaType,
         ids: targetIds,
@@ -218,12 +309,12 @@ export function CardActions({
       "history",
     );
 
-    if (success) {
-      setToastMessage(action === "add" ? "History Updated!" : "History Removed!");
+    if (result.ok) {
+      setToastMessage(action === "add" ? "Watched!" : "Removed!");
       router.refresh();
     } else {
       setWatched(action !== "add");
-      setToastMessage("Failed to update history.");
+      setToastMessage(result.message ?? "Failed to update history.");
     }
 
     setIsLoading(false);
@@ -240,18 +331,17 @@ export function CardActions({
     setIsLoading(true);
     const checkinType = episodeIds || mediaType === "episodes" ? "episode" : "movie";
     try {
-      const res = await fetch("/api/trakt/checkin", {
+      await fetchTraktRouteJson("/api/trakt/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [checkinType]: { ids: { trakt: traktId } } }),
+        timeoutMs: 10000,
       });
-      if (res.ok) {
-        setToastMessage("Watching now!");
-        setShowWatchOptions(false);
-        router.refresh();
-      } else {
-        setToastMessage(res.status === 409 ? "Already watching!" : "Check-in failed");
-      }
+      setToastMessage("Watching now!");
+      setShowWatchOptions(false);
+      router.refresh();
+    } catch (error) {
+      setToastMessage(getErrorMessage(error, "Check-in failed"));
     } finally {
       setIsLoading(false);
       setTimeout(() => setToastMessage(null), 2500);
@@ -267,7 +357,7 @@ export function CardActions({
     onRate?.(val);
     setShowRating(false);
 
-    const success = await syncTraktData(
+    const result = await syncTraktData(
       {
         type: episodeIds ? "episodes" : mediaType,
         ids: { trakt: traktId },
@@ -277,13 +367,13 @@ export function CardActions({
       "ratings",
     );
 
-    if (success) {
+    if (result.ok) {
       router.refresh();
       setToastMessage(isRemoving ? "Rating Removed!" : "Rated!");
     } else {
       setLocalRating(userRating && userRating > 0 ? userRating : undefined);
       onRate?.(userRating ?? 0);
-      setToastMessage("Failed to update rating.");
+      setToastMessage(result.message ?? "Failed to update rating.");
     }
 
     setIsLoading(false);
@@ -293,10 +383,14 @@ export function CardActions({
   useEffect(() => {
     if ((showWatchOptions || showRating || showListOptions) && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
+      // Logic to flip popover if there's no space on top (approx menu height 400px)
+      const shouldFlip = rect.top < 400;
       setPortalCoords({
         top: rect.top,
+        bottom: rect.bottom,
         left: rect.left + rect.width / 2,
         isMobile: window.innerWidth < 640,
+        shouldFlip,
       });
     }
   }, [showWatchOptions, showRating, showListOptions]);
@@ -309,6 +403,9 @@ export function CardActions({
           setShowRating(false);
           setShowListOptions(false);
           setShowAddAnotherPlay(false);
+          setShowOtherDatePicker(false);
+          setShowMonthSelect(false);
+          setShowYearSelect(false);
         }
       }
     };
@@ -317,22 +414,89 @@ export function CardActions({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showWatchOptions, showRating, showListOptions]);
 
+  const updateSelectedTime = (timeStr: string) => {
+    const [hours, minutes] = timeStr.split(":").map(Number);
+    const newDate = new Date(selectedDate);
+    newDate.setHours(hours, minutes);
+    setSelectedDate(newDate);
+  };
+
+  const handleManualTimeChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const [hours, minutes] = e.target.value.split(":").map(Number);
+    if (!isNaN(hours) && !isNaN(minutes)) {
+      const newDate = new Date(selectedDate);
+      newDate.setHours(hours, minutes);
+      setSelectedDate(newDate);
+    }
+  };
+
+  const adjustMinute = (delta: number) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMinutes(newDate.getMinutes() + delta);
+    setSelectedDate(newDate);
+  };
+
+  const updateSelectedDay = (day: number) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(day);
+    setSelectedDate(newDate);
+  };
+
+  const handlePrevMonth = useCallback(() => {
+    setSelectedDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, prev.getDate()));
+  }, []);
+
+  const handleNextMonth = useCallback(() => {
+    setSelectedDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, prev.getDate()));
+  }, []);
+
+  useEffect(() => {
+    const calendarEl = calendarContainerRef.current;
+    if (!calendarEl) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.deltaY < 0) handlePrevMonth();
+      else handleNextMonth();
+    };
+
+    calendarEl.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => calendarEl.removeEventListener("wheel", handleNativeWheel);
+  }, [handlePrevMonth, handleNextMonth, showOtherDatePicker]);
+
+  const handleGoHome = () => {
+    setSelectedDate(getNearestQuarterHour(new Date()));
+  };
+
+  const handleOpenOtherDate = () => {
+    setSelectedDate(getNearestQuarterHour(new Date()));
+    setShowOtherDatePicker(true);
+  };
+
   const renderPortalContent = () => {
     if (!showRating && !showWatchOptions && !showListOptions) return null;
     if (!portalCoords || typeof window === "undefined") return null;
-    const { top, left, isMobile } = portalCoords;
+    const { top, bottom, left, isMobile, shouldFlip } = portalCoords;
+
+    const currentFormattedDate = selectedDate.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    const currentFormattedTime = `${selectedDate.getHours().toString().padStart(2, "0")}:${selectedDate.getMinutes().toString().padStart(2, "0")}`;
 
     return createPortal(
       <div
         className="portal-menu-content"
         style={{
           position: "fixed",
-          top: isMobile ? "auto" : `${top}px`,
+          top: isMobile ? "auto" : shouldFlip ? `${bottom}px` : `${top}px`,
           bottom: isMobile ? "2rem" : "auto",
           left: isMobile ? "50%" : `${left}px`,
           transform: "translateX(-50%)",
           width: isMobile ? "calc(100vw - 2rem)" : "auto",
-          maxWidth: isMobile ? "340px" : "none",
+          maxWidth: isMobile ? "380px" : "none",
           zIndex: 10000,
           pointerEvents: "none",
         }}
@@ -341,83 +505,367 @@ export function CardActions({
           {showWatchOptions && (
             <div
               className={cn(
-                "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20",
-                !isMobile && "absolute bottom-4 w-[240px]",
+                "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20 transition-all",
+                !isMobile && (showOtherDatePicker ? "w-[360px]" : "w-[220px]"),
+                !isMobile && (shouldFlip ? "absolute top-4" : "absolute bottom-4"),
               )}
             >
-              <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                {watched && !showAddAnotherPlay ? "Manage History" : "Mark Progress"}
-              </p>
-              <div className="flex flex-col gap-2">
-                {!watched || showAddAnotherPlay ? (
-                  <>
-                    <button
-                      onClick={handleCheckin}
-                      disabled={isLoading}
-                      className="rounded-md bg-purple-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-purple-500 disabled:opacity-50 transition-colors text-center"
-                    >
-                      {isLoading ? "Syncing..." : "Check-in (Watching Now)"}
-                    </button>
-                    <button
-                      onClick={() => handleWatchAction("add", new Date().toISOString())}
-                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                    >
-                      Just Watched
-                    </button>
-                    <button
-                      onClick={() =>
-                        releasedAt
-                          ? handleWatchAction("add", new Date(releasedAt).toISOString())
-                          : null
-                      }
-                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                    >
-                      Release Date {formattedReleaseDate ? `(${formattedReleaseDate})` : ""}
-                    </button>
-                    <button
-                      onClick={() => handleWatchAction("add", "1970-01-01T00:00:00.000Z")}
-                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                    >
-                      Unknown Date
-                    </button>
-                    <div className="mt-1 border-t border-zinc-800 pt-3">
-                      <p className="text-[9px] font-black text-zinc-500 uppercase mb-2 text-center">
-                        Custom Date
-                      </p>
-                      <input
-                        type="datetime-local"
-                        value={customDate}
-                        onChange={(e) => setCustomDate(e.target.value)}
-                        className="w-full rounded-md bg-black px-2 py-1.5 text-[10px] text-white outline-none focus:ring-1 focus:ring-purple-500 [color-scheme:dark]"
-                      />
-                      <button
-                        onClick={() =>
-                          customDate && handleWatchAction("add", new Date(customDate).toISOString())
-                        }
-                        disabled={!customDate || isLoading}
-                        className="mt-2 w-full rounded-md bg-zinc-700 py-1.5 text-[10px] font-black uppercase text-white disabled:opacity-30 text-center hover:bg-zinc-600 transition-colors"
+              {!showOtherDatePicker ? (
+                <>
+                  <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    {watched && !showAddAnotherPlay ? "Manage History" : "Mark Progress"}
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {!watched || showAddAnotherPlay ? (
+                      <>
+                        <button
+                          onClick={handleCheckin}
+                          disabled={isLoading}
+                          className="rounded-md bg-purple-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-purple-500 disabled:opacity-50 transition-colors text-center"
+                        >
+                          {isLoading ? "Syncing..." : "Check-in"}
+                        </button>
+                        <button
+                          onClick={() => handleWatchAction("add", new Date().toISOString())}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Just Watched
+                        </button>
+                        <button
+                          onClick={() =>
+                            releasedAt
+                              ? handleWatchAction("add", new Date(releasedAt).toISOString())
+                              : null
+                          }
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Release Date
+                        </button>
+                        <button
+                          onClick={() => handleWatchAction("add", "1970-01-01T00:00:00.000Z")}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Unknown Date
+                        </button>
+                        <button
+                          onClick={handleOpenOtherDate}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Other Date
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setShowAddAnotherPlay(true)}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Add Another Play
+                        </button>
+                        <button
+                          onClick={() => handleWatchAction("remove")}
+                          className="rounded-md bg-red-600/20 px-3 py-2 text-[10px] font-black uppercase text-red-500 hover:bg-red-600/30 transition-colors text-center"
+                        >
+                          Remove from History
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-3">
+                    <span className="text-[11px] font-black uppercase tracking-tight text-white">
+                      When did you watch this?
+                    </span>
+                    <button onClick={() => setShowOtherDatePicker(false)}>
+                      <svg
+                        className="h-4 w-4 text-zinc-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        Save Custom Date
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-zinc-950/50 rounded-lg p-2 mb-4 border border-white/5">
+                    <div className="flex flex-col flex-1">
+                      <span className="text-[10px] font-black text-zinc-500 uppercase mb-0.5">
+                        Selected Date
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-bold text-white leading-none">
+                          {currentFormattedDate}
+                        </span>
+                        <div className="relative flex items-center">
+                          <input
+                            type="time"
+                            value={currentFormattedTime}
+                            onChange={handleManualTimeChange}
+                            className="bg-zinc-800/50 px-1.5 py-0.5 rounded text-[12px] font-bold text-purple-400 outline-none border border-white/5 focus:border-purple-500/50 tabular-nums transition-all hover:bg-zinc-800"
+                            style={{ colorScheme: "dark" }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowOtherDatePicker(false)}
+                        className="p-2 rounded bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                      >
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleWatchAction("add", selectedDate.toISOString())}
+                        className="p-2 rounded bg-green-600 text-white hover:bg-green-500 transition-colors"
+                      >
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
                       </button>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setShowAddAnotherPlay(true)}
-                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                  </div>
+
+                  <div className="flex items-center justify-between mb-4 relative px-1">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={handlePrevMonth}
+                        className="p-1 hover:bg-zinc-800 rounded transition-colors"
+                      >
+                        <svg
+                          className="h-3 w-3 text-zinc-400"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={handleGoHome}
+                        className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-400 hover:text-white"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+                        </svg>
+                      </button>
+                      <div className="flex items-center gap-4 mx-3">
+                        <button
+                          onClick={() => {
+                            setShowMonthSelect(!showMonthSelect);
+                            setShowYearSelect(false);
+                          }}
+                          className="text-[12px] font-bold text-zinc-200 hover:text-white transition-colors"
+                        >
+                          {months[selectedDate.getMonth()]}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowYearSelect(!showYearSelect);
+                            setShowMonthSelect(false);
+                          }}
+                          className="text-[12px] font-bold text-zinc-200 hover:text-white transition-colors"
+                        >
+                          {selectedDate.getFullYear()}
+                        </button>
+                      </div>
+                      <button
+                        onClick={handleNextMonth}
+                        className="p-1 hover:bg-zinc-800 rounded transition-colors"
+                      >
+                        <svg
+                          className="h-3 w-3 text-zinc-400"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {showMonthSelect && (
+                      <div className="absolute top-8 left-0 z-50 w-32 max-h-48 overflow-y-auto bg-zinc-800 rounded shadow-xl ring-1 ring-white/10 custom-scrollbar">
+                        {months.map((m, i) => (
+                          <button
+                            key={m}
+                            onClick={() => {
+                              const newD = new Date(selectedDate);
+                              newD.setMonth(i);
+                              setSelectedDate(newD);
+                              setShowMonthSelect(false);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-zinc-300 hover:bg-purple-600 hover:text-white"
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {showYearSelect && (
+                      <div className="absolute top-8 left-20 z-50 w-24 max-h-48 overflow-y-auto bg-zinc-800 rounded shadow-xl ring-1 ring-white/10 custom-scrollbar">
+                        {years.map((y) => (
+                          <button
+                            key={y}
+                            onClick={() => {
+                              const newD = new Date(selectedDate);
+                              newD.setFullYear(y);
+                              setSelectedDate(newD);
+                              setShowYearSelect(false);
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-zinc-300 hover:bg-purple-600 hover:text-white"
+                          >
+                            {y}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-4 h-52">
+                    <div ref={calendarContainerRef} className="flex-1 overscroll-contain">
+                      <div className="grid grid-cols-7 mb-1">
+                        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                          <div
+                            key={i}
+                            className="text-center text-[9px] font-black text-zinc-500 uppercase"
+                          >
+                            {d}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-px bg-zinc-800 rounded overflow-hidden border border-zinc-800">
+                        {Array.from({ length: daysInMonth.firstDay }).map((_, i) => (
+                          <div key={`empty-${i}`} className="h-6 bg-zinc-900/50" />
+                        ))}
+                        {Array.from({ length: daysInMonth.days }).map((_, i) => {
+                          const day = i + 1;
+                          const isSelected = selectedDate.getDate() === day;
+                          const isToday =
+                            new Date().toDateString() ===
+                            new Date(
+                              selectedDate.getFullYear(),
+                              selectedDate.getMonth(),
+                              day,
+                            ).toDateString();
+                          return (
+                            <button
+                              key={day}
+                              onClick={() => updateSelectedDay(day)}
+                              className={cn(
+                                "h-6 text-[10px] font-bold transition-colors relative",
+                                isSelected
+                                  ? "bg-purple-600 text-white"
+                                  : "bg-zinc-900 text-zinc-400 hover:bg-zinc-800",
+                                isToday && !isSelected && "text-purple-400",
+                              )}
+                            >
+                              {day}
+                              {isToday && (
+                                <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-0.5 h-0.5 rounded-full bg-purple-500" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-4 flex items-center justify-between bg-zinc-950 p-1.5 rounded border border-white/5">
+                        <button
+                          onClick={() => adjustMinute(-1)}
+                          className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M20 12H4"
+                            />
+                          </svg>
+                        </button>
+                        <span className="text-[10px] font-black text-white tracking-widest tabular-nums">
+                          {currentFormattedTime}
+                        </span>
+                        <button
+                          onClick={() => adjustMinute(1)}
+                          className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div
+                      ref={timeListRef}
+                      className="w-20 overflow-y-auto pr-1 custom-scrollbar bg-zinc-950 rounded ring-1 ring-white/5 relative overscroll-contain"
                     >
-                      Add Another Play
-                    </button>
-                    <button
-                      onClick={() => handleWatchAction("remove")}
-                      className="rounded-md bg-red-600/20 px-3 py-2 text-[10px] font-black uppercase text-red-500 hover:bg-red-600/30 transition-colors text-center"
-                    >
-                      Remove from History
-                    </button>
-                  </>
-                )}
-              </div>
+                      {timeOptions.map((t) => {
+                        const currentRoundedTimeStr = `${selectedDate.getHours().toString().padStart(2, "0")}:${((Math.round(selectedDate.getMinutes() / 15) * 15) % 60).toString().padStart(2, "0")}`;
+                        const isSelected = currentRoundedTimeStr === t;
+                        return (
+                          <button
+                            key={t}
+                            ref={isSelected ? activeTimeRef : null}
+                            onClick={() => updateSelectedTime(t)}
+                            className={cn(
+                              "w-full py-1.5 text-[10px] font-bold transition-colors border-b border-zinc-900",
+                              isSelected
+                                ? "bg-purple-600 text-white"
+                                : "text-zinc-400 hover:text-white hover:bg-zinc-800",
+                            )}
+                          >
+                            {t}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -425,7 +873,8 @@ export function CardActions({
             <div
               className={cn(
                 "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20",
-                !isMobile && "absolute bottom-4 w-[240px]",
+                !isMobile && "w-[240px]",
+                !isMobile && (shouldFlip ? "absolute top-4" : "absolute bottom-4"),
               )}
             >
               <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
@@ -452,7 +901,8 @@ export function CardActions({
             <div
               className={cn(
                 "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-5 shadow-2xl ring-1 ring-white/20",
-                !isMobile && "absolute bottom-4 w-[300px]",
+                !isMobile && "w-[300px]",
+                !isMobile && (shouldFlip ? "absolute top-4" : "absolute bottom-4"),
               )}
             >
               <div className="mb-4 text-center">
@@ -517,7 +967,7 @@ export function CardActions({
         !(showWatchOptions || showListOptions || showRating) &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-[11000] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-100"
+            className="pointer-events-none fixed z-[11000] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10"
             style={{ top: `${tooltipPos.top}px`, left: `${tooltipPos.left}px` }}
           >
             {activeTooltip}

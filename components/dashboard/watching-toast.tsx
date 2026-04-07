@@ -6,6 +6,8 @@ import { ProxiedImage } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
 import { getTmdbImageAction } from "@/app/actions/tmdb";
+import { ApiRequestError } from "@/lib/api/http";
+import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
 import { useWatching } from "@/lib/use-watching";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +44,16 @@ interface TraktWatchingResponse {
   };
 }
 
+interface RatingData {
+  traktId: number;
+  type: "episode" | "movie";
+  title: string;
+  subTitle: string;
+  mainHref: string;
+  showHref?: string;
+  imageUrl?: string | null;
+}
+
 const TRAKT_RATINGS: Record<number, string> = {
   1: "1/10 Weak sauce :(",
   2: "2/10 Terrible",
@@ -54,6 +66,8 @@ const TRAKT_RATINGS: Record<number, string> = {
   9: "9/10 Superb",
   10: "10/10 Totally Ninja!",
 };
+
+const PROGRESS_THRESHOLD = 98;
 
 export function WatchingToast() {
   const router = useRouter();
@@ -72,16 +86,7 @@ export function WatchingToast() {
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [submittedRating, setSubmittedRating] = useState<number | null>(null);
   const [isLoadingRating, setIsLoadingRating] = useState(false);
-
-  const [ratingData, setRatingData] = useState<{
-    traktId: number;
-    type: "episode" | "movie";
-    title: string;
-    subTitle: string;
-    mainHref: string;
-    showHref?: string;
-    imageUrl?: string | null;
-  } | null>(null);
+  const [ratingData, setRatingData] = useState<RatingData | null>(null);
 
   const [backoffMs, setBackoffMs] = useState(0);
   const lastMediaId = useRef<number | null>(null);
@@ -119,7 +124,9 @@ export function WatchingToast() {
   };
 
   const triggerRatingForItem = useCallback(
-    (item: TraktWatchingResponse) => {
+    (item: TraktWatchingResponse, currentImg: string | null) => {
+      if (isRatingPhase) return;
+
       const isEp = item.type === "episode";
       const slug = isEp ? item.show?.ids.slug : item.movie?.ids.slug;
 
@@ -134,68 +141,62 @@ export function WatchingToast() {
           ? `/shows/${slug}/seasons/${item.episode?.season}/episodes/${item.episode?.number}`
           : `/movies/${slug}`,
         showHref: isEp ? `/shows/${slug}` : undefined,
-        imageUrl: imageUrl, // Keep current image for the rating UI
+        imageUrl: currentImg,
       });
+
       setIsRatingPhase(true);
       setIsWatching(false);
+      setRatingCountdown(30);
     },
-    [imageUrl, setIsWatching],
+    [isRatingPhase, setIsWatching],
   );
 
   const checkWatching = useCallback(async () => {
-    if (isFetching.current || isClosedManually || isRatingPhase || typeof document === "undefined")
+    // Stop polling if manually closed, rating phase is active, or threshold reached
+    if (
+      isFetching.current ||
+      isClosedManually ||
+      isRatingPhase ||
+      progressRef.current >= PROGRESS_THRESHOLD ||
+      typeof document === "undefined"
+    )
       return;
 
     isFetching.current = true;
     try {
-      const res = await fetch("/api/trakt/users/me/watching?extended=full,images", {
-        cache: "no-store",
-        headers: { "X-Poll-Request": "true" },
-      });
-
-      if (res.status === 429) {
-        setBackoffMs((prev) => Math.min(prev + 60000, 300000));
-        return;
-      }
+      const data = await fetchTraktRouteJson<TraktWatchingResponse>(
+        "/api/trakt/users/me/watching?extended=full,images",
+        {
+          cache: "no-store",
+          headers: { "X-Poll-Request": "true" },
+          timeoutMs: 10000,
+          maxRetries: 2,
+        },
+      );
 
       setBackoffMs(0);
 
-      if (res.status === 204) {
+      if (!data) {
         const lastKnown = scrobbleRef.current;
-        const currentRating =
-          lastKnown?.type === "episode" ? lastKnown.episode?.rating : lastKnown?.movie?.rating;
-
-        if (
-          lastMediaId.current &&
-          progressRef.current > 90 &&
-          (!currentRating || currentRating === 0)
-        ) {
-          if (lastKnown) triggerRatingForItem(lastKnown);
+        if (lastMediaId.current && progressRef.current > PROGRESS_THRESHOLD && lastKnown) {
+          triggerRatingForItem(lastKnown, imageUrl);
         } else {
           hideRatingPhase();
         }
         return;
       }
 
-      const data = (await res.json()) as TraktWatchingResponse;
-
       if (data && data.type) {
         const currentId =
           data.type === "episode" ? data.episode?.ids?.trakt : data.movie?.ids?.trakt;
 
-        // Transition Detection: New media detected
+        // If media changed and last one was near completion, trigger rating
         if (lastMediaId.current && currentId !== lastMediaId.current) {
           const prevScrobble = scrobbleRef.current;
-          const prevRating =
-            prevScrobble?.type === "episode"
-              ? prevScrobble.episode?.rating
-              : prevScrobble?.movie?.rating;
-
-          // If the PREVIOUS item finished (>90%) and had no rating, intercept for rating
-          if (progressRef.current > 90 && (!prevRating || prevRating === 0) && prevScrobble) {
-            triggerRatingForItem(prevScrobble);
+          if (progressRef.current > PROGRESS_THRESHOLD && prevScrobble) {
+            triggerRatingForItem(prevScrobble, imageUrl);
             isFetching.current = false;
-            return; // Don't update UI to new media yet
+            return;
           }
         }
 
@@ -230,17 +231,34 @@ export function WatchingToast() {
         scrobbleRef.current = data;
         setIsVisible(true);
         setIsWatching(true);
+
+        if (data.progress > PROGRESS_THRESHOLD) {
+          triggerRatingForItem(data, imageUrl);
+        }
       }
-    } catch (e) {
-      console.error("[WatchingToast] Fetch error:", e);
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 429) {
+        setBackoffMs((prev) => Math.min(prev + 60000, 300000));
+        return;
+      }
+      console.error("[WatchingToast] Check error:", error);
     } finally {
       isFetching.current = false;
     }
-  }, [isClosedManually, isRatingPhase, hideRatingPhase, triggerRatingForItem]);
+  }, [
+    isClosedManually,
+    isRatingPhase,
+    hideRatingPhase,
+    triggerRatingForItem,
+    imageUrl,
+    setIsWatching,
+  ]);
 
   useEffect(() => {
     const runPolling = () => {
-      if (isClosedManually || isRatingPhase) return;
+      // Logic to stop requests when reaching threshold or rating phase
+      if (isClosedManually || isRatingPhase || progressRef.current >= PROGRESS_THRESHOLD) return;
+
       checkWatching();
       const interval = document.hidden ? 180000 : progressRef.current > 85 ? 30000 : 60000;
       pollTimer.current = setTimeout(runPolling, interval + backoffMs);
@@ -252,7 +270,7 @@ export function WatchingToast() {
   }, [checkWatching, backoffMs, isClosedManually, isRatingPhase]);
 
   useEffect(() => {
-    if (!scrobble || isRatingPhase) return;
+    if (!scrobble) return;
     const update = () => {
       const start = new Date(scrobble.started_at).getTime();
       const end = new Date(scrobble.expires_at).getTime();
@@ -263,6 +281,11 @@ export function WatchingToast() {
         const currentProgress = Math.min(100, Math.max(0, ((now - start) / total) * 100));
         setSmoothProgress(currentProgress);
         progressRef.current = currentProgress;
+
+        // Trigger rating phase at 98% based on local clock to avoid extra API calls
+        if (currentProgress >= PROGRESS_THRESHOLD && !isRatingPhase) {
+          triggerRatingForItem(scrobble, imageUrl);
+        }
       }
 
       const diff = end - now;
@@ -276,7 +299,7 @@ export function WatchingToast() {
     update();
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [scrobble, isRatingPhase]);
+  }, [scrobble, isRatingPhase, triggerRatingForItem, imageUrl]);
 
   useEffect(() => {
     if (!isRatingPhase || submittedRating) return;
@@ -297,18 +320,20 @@ export function WatchingToast() {
     setIsLoadingRating(true);
     const type = ratingData.type === "episode" ? "episodes" : "movies";
     try {
-      const res = await fetch("/api/trakt/sync/ratings", {
+      await fetchTraktRouteJson("/api/trakt/sync/ratings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [type]: [{ ids: { trakt: ratingData.traktId }, rating: val }] }),
+        timeoutMs: 10000,
       });
-      if (res.ok) {
-        setSubmittedRating(val);
-        router.refresh();
-        setTimeout(() => hideRatingPhase(), 2500);
-      }
-    } catch (e) {
-      console.error("[WatchingToast] Rating error:", e);
+      setSubmittedRating(val);
+      router.refresh();
+      setTimeout(() => hideRatingPhase(), 2500);
+    } catch (error) {
+      console.error(
+        "[WatchingToast] Rating error:",
+        getErrorMessage(error, "Failed to save rating"),
+      );
     } finally {
       setIsLoadingRating(false);
     }
@@ -333,6 +358,7 @@ export function WatchingToast() {
     : scrobble?.type === "episode"
       ? `/shows/${scrobble.show?.ids.slug}`
       : null;
+
   const subTitleText = isRatingPhase
     ? ratingData?.subTitle
     : scrobble?.type === "episode"
@@ -348,7 +374,7 @@ export function WatchingToast() {
         className="fixed bottom-6 right-6 z-[100] flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black shadow-2xl transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-2"
       >
         <div className="absolute top-0 right-0 z-10 flex h-3 w-3 items-center justify-center">
-          <span className="animate-pulse rounded-full bg-red-800 h-2.5 w-2.5 shadow-[0_0_8px_rgba(153,27,27,0.8)]"></span>
+          <span className="animate-pulse rounded-full bg-red-800 h-2.5 w-2.5 shadow-[0_0_8px_rgba(153,27,27,0.8)]" />
         </div>
         {isRatingPhase ? (
           <Heart size={24} className="text-red-500 fill-red-500/20" />
@@ -375,7 +401,10 @@ export function WatchingToast() {
                 setIsVisible(false);
                 setIsWatching(false);
                 setIsClosedManually(true);
-                await fetch("/api/trakt/checkin", { method: "DELETE" });
+                await fetchTraktRouteJson("/api/trakt/checkin", {
+                  method: "DELETE",
+                  timeoutMs: 10000,
+                }).catch(() => null);
                 hideRatingPhase();
                 router.refresh();
               }}
@@ -406,7 +435,7 @@ export function WatchingToast() {
             ) : (
               <>
                 <div className="relative h-2 w-2">
-                  <span className="absolute inset-0 animate-pulse rounded-full bg-red-800"></span>
+                  <span className="absolute inset-0 animate-pulse rounded-full bg-red-800" />
                 </div>
                 <span className="text-[9px] font-black uppercase tracking-[0.3em] text-red-500">
                   Watching Now
@@ -438,7 +467,7 @@ export function WatchingToast() {
             {currentImageUrl ? (
               <ProxiedImage
                 src={currentImageUrl}
-                alt="Media"
+                alt="Media Cover"
                 width={112}
                 height={63}
                 className="h-full w-full object-cover"
@@ -491,7 +520,7 @@ export function WatchingToast() {
               <>
                 <div className="flex items-center justify-center h-4">
                   <span className="text-[10px] font-black italic text-white uppercase tracking-tighter text-center">
-                    {hoverRating ? TRAKT_RATINGS[hoverRating] : ""}
+                    {hoverRating ? TRAKT_RATINGS[hoverRating] : "How was it?"}
                   </span>
                 </div>
                 <div

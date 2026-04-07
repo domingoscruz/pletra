@@ -18,6 +18,7 @@ export function CardGrid({
   defaultRows = 3,
   gridClass,
 }: CardGridProps) {
+  const normalizedChildren = children.filter((child) => child !== null && child !== false);
   const [columns, setColumns] = useState(rowSize);
   const [page, setPage] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
@@ -42,7 +43,7 @@ export function CardGrid({
   }, [updateLayout]);
 
   const itemsPerPage = columns * defaultRows;
-  const totalPages = Math.ceil(children.length / itemsPerPage);
+  const totalPages = Math.ceil(normalizedChildren.length / itemsPerPage);
 
   useEffect(() => {
     if (page >= totalPages && totalPages > 0) {
@@ -87,8 +88,8 @@ export function CardGrid({
 
   // On Desktop: Slice items by page. On Mobile: Show all items for scrolling.
   const visibleItems = isMobile
-    ? children
-    : children.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
+    ? normalizedChildren
+    : normalizedChildren.slice(page * itemsPerPage, (page + 1) * itemsPerPage);
 
   return (
     <div onWheel={handleWheel} className="w-full overflow-hidden">

@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { requestWithPolicy } from "@/lib/api/http";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
@@ -47,7 +48,11 @@ export const fetchTmdbImages = cache(
       url = `https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?api_key=${process.env.TMDB_API_KEY}`;
     }
 
-    const res = await fetch(url, { next: { revalidate: IMAGE_CACHE_TTL } });
+    const res = await requestWithPolicy(
+      url,
+      { next: { revalidate: IMAGE_CACHE_TTL } },
+      { timeoutMs: 10000, maxRetries: 2 },
+    );
 
     if (!res.ok) {
       return { poster: null, backdrop: null, still: null };
@@ -76,9 +81,10 @@ export const fetchTmdbEpisodeImages = cache(
 
 export const fetchTmdbPersonImage = cache(async (tmdbId: number): Promise<string | null> => {
   try {
-    const res = await fetch(
+    const res = await requestWithPolicy(
       `https://api.themoviedb.org/3/person/${tmdbId}?api_key=${process.env.TMDB_API_KEY}`,
       { next: { revalidate: IMAGE_CACHE_TTL } },
+      { timeoutMs: 10000, maxRetries: 2 },
     );
     if (!res.ok) return null;
     const data = await res.json<{ profile_path?: string }>();

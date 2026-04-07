@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import Link from "@/components/ui/link";
+import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
 import { CardImage } from "./card-image";
 import { CardActions } from "./card-actions";
 import { cn } from "@/lib/utils";
@@ -61,13 +63,20 @@ export interface MediaCardProps {
     | "Season Finale"
     | "Series Finale"
     | "New Episode";
+  status?: string; // Trakt show status: ended, returning series, etc.
   statusBadge?: string;
   badge?: string;
   timeBadge?: string;
+  timeBadgeTooltip?: string;
   isWatched?: boolean;
   isInWatchlist?: boolean;
   priority?: boolean;
   showNewBadge?: boolean;
+  showTitleAction?: {
+    type: "hide-calendar";
+    traktId: number;
+    onSuccess?: () => void;
+  };
 }
 
 /**
@@ -103,14 +112,18 @@ export function MediaCard({
   disableHover = false,
   showInlineActions = false,
   specialTag,
+  status,
   statusBadge,
   badge,
   timeBadge,
+  timeBadgeTooltip,
   isWatched = false,
   isInWatchlist = false,
   priority = false,
   showNewBadge = false,
+  showTitleAction,
 }: MediaCardProps) {
+  const router = useRouter();
   const isPoster = variant === "poster";
 
   const resolveImageUrl = (...urls: (string | null | undefined)[]): string | null => {
@@ -135,9 +148,42 @@ export function MediaCard({
   const localChange = useRef(false);
 
   const [isHovered, setIsHovered] = useState(false);
+  const [isTimeBadgeHovered, setIsTimeBadgeHovered] = useState(false);
+  const [timeBadgePosition, setTimeBadgePosition] = useState({ top: 0, left: 0 });
+  const [showTitleActionMenu, setShowTitleActionMenu] = useState(false);
+  const [titleActionLoading, setTitleActionLoading] = useState(false);
+  const [isTitleActionHovered, setIsTitleActionHovered] = useState(false);
+  const [titleActionTooltipPos, setTitleActionTooltipPos] = useState({ top: 0, left: 0 });
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
+  const timeBadgeRef = useRef<HTMLDivElement>(null);
+  const titleActionRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showTitleActionMenu) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        titleActionRef.current &&
+        !titleActionRef.current.contains(event.target as Node) &&
+        !(event.target as HTMLElement).closest("[data-title-action-menu='true']")
+      ) {
+        setShowTitleActionMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showTitleActionMenu]);
+
+  /**
+   * Logic to prevent "Series Finale" tag when show status is not "ended".
+   */
+  const effectiveSpecialTag =
+    specialTag === "Series Finale" && status?.toLowerCase() !== "ended"
+      ? "Season Finale"
+      : specialTag;
 
   useEffect(() => {
     setMounted(true);
@@ -197,9 +243,30 @@ export function MediaCard({
   const targetX = barMidpoint.x + (mousePos.x - barMidpoint.x) * 0.5;
   const targetY = barMidpoint.y + (mousePos.y - barMidpoint.y) * 0.5;
 
-  const isTopTag = specialTag && specialTag !== "New Episode";
+  const isTopTag = effectiveSpecialTag && effectiveSpecialTag !== "New Episode";
 
   const ribbonColor = optimisticRating ? getRibbonColor(optimisticRating) : "transparent";
+
+  const handleHideCalendarShow = async () => {
+    if (!showTitleAction || titleActionLoading) return;
+
+    setTitleActionLoading(true);
+    try {
+      await fetchTraktRouteJson("/api/trakt/hidden-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ traktId: showTitleAction.traktId }),
+        timeoutMs: 10000,
+      });
+      showTitleAction.onSuccess?.();
+      setShowTitleActionMenu(false);
+      router.refresh();
+    } catch (error) {
+      console.error(getErrorMessage(error, "Failed to hide show"));
+    } finally {
+      setTitleActionLoading(false);
+    }
+  };
 
   return (
     <div className="group relative flex w-full flex-col antialiased animate-in fade-in duration-300">
@@ -213,10 +280,10 @@ export function MediaCard({
               <div
                 className={cn(
                   "absolute top-0 left-0 right-0 z-30 flex h-[20px] w-full items-center justify-center text-[9px] font-black uppercase tracking-[0.15em] text-white shadow-md leading-none ring-1 ring-black/10",
-                  SPECIAL_TAG_COLORS[specialTag] || "bg-zinc-800",
+                  SPECIAL_TAG_COLORS[effectiveSpecialTag] || "bg-zinc-800",
                 )}
               >
-                {specialTag}
+                {effectiveSpecialTag}
               </div>
             )}
 
@@ -238,11 +305,24 @@ export function MediaCard({
 
             <div
               className={cn(
-                "absolute top-2 left-2 z-40 flex items-center gap-1.5 pointer-events-none transition-all duration-200",
+                "absolute top-2 left-2 z-40 flex items-center gap-1.5 transition-all duration-200",
               )}
             >
               {timeBadge && (
-                <div className="rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10">
+                <div
+                  ref={timeBadgeRef}
+                  onMouseEnter={() => {
+                    if (!timeBadgeTooltip || !timeBadgeRef.current) return;
+                    const rect = timeBadgeRef.current.getBoundingClientRect();
+                    setTimeBadgePosition({
+                      top: rect.top - 8,
+                      left: rect.left + rect.width / 2,
+                    });
+                    setIsTimeBadgeHovered(true);
+                  }}
+                  onMouseLeave={() => setIsTimeBadgeHovered(false)}
+                  className="pointer-events-auto rounded-sm bg-black/80 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl backdrop-blur-md ring-1 ring-white/10"
+                >
                   {timeBadge}
                 </div>
               )}
@@ -336,12 +416,68 @@ export function MediaCard({
             {mediaType !== "movies" ? subtitle : title}
           </Link>
           {mediaType !== "movies" && showHref ? (
-            <Link
-              href={showHref}
-              className="mt-1 block w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
-            >
-              {title}
-            </Link>
+            <div className="relative mt-1 flex w-full items-center justify-center gap-1.5">
+              <Link
+                href={showHref}
+                className="block max-w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
+              >
+                {title}
+              </Link>
+              {showTitleAction && (
+                <>
+                  <button
+                    ref={titleActionRef}
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setShowTitleActionMenu((current) => !current);
+                    }}
+                    onMouseEnter={() => {
+                      if (!titleActionRef.current) return;
+                      const rect = titleActionRef.current.getBoundingClientRect();
+                      setTitleActionTooltipPos({
+                        top: rect.top - 8,
+                        left: rect.left + rect.width / 2,
+                      });
+                      setIsTitleActionHovered(true);
+                    }}
+                    onMouseLeave={() => setIsTitleActionHovered(false)}
+                    className="shrink-0 text-zinc-400 transition-colors hover:text-white"
+                    aria-label="Hide this show"
+                  >
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2.2}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M7 12h10" />
+                      <circle cx="12" cy="12" r="9" />
+                    </svg>
+                  </button>
+                  {showTitleActionMenu && (
+                    <div
+                      data-title-action-menu="true"
+                      className="absolute left-1/2 top-full z-50 mt-2 w-44 -translate-x-1/2 rounded-xl bg-zinc-900 p-3 shadow-2xl ring-1 ring-white/10"
+                    >
+                      <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+                        This show will be added to your dropped shows.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleHideCalendarShow}
+                        disabled={titleActionLoading}
+                        className="w-full rounded-md bg-red-600/15 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-400 transition-colors hover:bg-red-600/25 disabled:opacity-50"
+                      >
+                        {titleActionLoading ? "Hiding..." : "Hide This Show"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           ) : (
             <p className="mt-1 w-full truncate text-[11px] font-medium leading-tight text-zinc-400">
               {mediaType !== "movies" ? title : subtitle}
@@ -354,7 +490,7 @@ export function MediaCard({
         mounted &&
         createPortal(
           <div
-            className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20 animate-in fade-in zoom-in-95 duration-75"
+            className="pointer-events-none absolute z-[10000] -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl ring-1 ring-white/20"
             style={{ top: `${targetY - 35}px`, left: `${targetX}px` }}
           >
             <div className="flex items-center gap-1.5">
@@ -365,6 +501,46 @@ export function MediaCard({
               </span>
             </div>
             <div className="absolute left-1/2 top-full -mt-1 -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+          </div>,
+          document.body,
+        )}
+
+      {isTimeBadgeHovered &&
+        timeBadgeTooltip &&
+        mounted &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[11000] -translate-x-1/2"
+            style={{
+              top: `${timeBadgePosition.top}px`,
+              left: `${timeBadgePosition.left}px`,
+              transform: "translateY(-100%)",
+            }}
+          >
+            <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
+              {timeBadgeTooltip}
+              <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {isTitleActionHovered &&
+        showTitleAction &&
+        mounted &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[11000] -translate-x-1/2"
+            style={{
+              top: `${titleActionTooltipPos.top}px`,
+              left: `${titleActionTooltipPos.left}px`,
+              transform: "translateY(-100%)",
+            }}
+          >
+            <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
+              Hide This Show
+              <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+            </div>
           </div>,
           document.body,
         )}

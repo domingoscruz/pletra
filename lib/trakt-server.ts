@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { auth } from "@/lib/auth";
 import { createTraktClient, type TraktClient } from "./trakt";
+import type { SettingsResponse } from "@trakt/api";
 
 interface TraktTokens {
   accessToken: string | null;
@@ -27,6 +28,11 @@ const getTraktTokens = cache(async (): Promise<TraktTokens> => {
     // Safely attempt to extract refreshToken if the auth provider exposes it
     refreshToken: (tokenResponse as any)?.refreshToken ?? null,
   };
+});
+
+export const getTraktAccessToken = cache(async (): Promise<string | null> => {
+  const { accessToken } = await getTraktTokens();
+  return accessToken;
 });
 
 export async function getAuthenticatedTraktClient(): Promise<TraktClient> {
@@ -76,3 +82,16 @@ export async function isCurrentUser(profileSlug: string): Promise<boolean> {
   const lowerSlug = profileSlug.toLowerCase();
   return user.username.toLowerCase() === lowerSlug || user.slug.toLowerCase() === lowerSlug;
 }
+
+export const getUserSettings = cache(async (): Promise<SettingsResponse | null> => {
+  try {
+    const client = await getAuthenticatedTraktClient();
+    const response = await client.users.settings({
+      query: { extended: "browsing" },
+    });
+
+    return response.status === 200 ? response.body : null;
+  } catch {
+    return null;
+  }
+});

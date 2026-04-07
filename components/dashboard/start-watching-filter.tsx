@@ -34,8 +34,8 @@ export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWa
   const [filter, setFilter] = useState<"all" | "shows" | "movies">("all");
 
   /**
-   * Memoized sorting and filtering logic.
-   * Items are sorted by airDate in descending order.
+   * Memoized filtering logic.
+   * Item order is preserved from the server so the 12h rotation can work.
    */
   const filteredItems = useMemo(() => {
     let result: TraktMediaItem[] = [];
@@ -48,7 +48,7 @@ export function StartWatchingFilter({ showItems = [], movieItems = [] }: StartWa
       result = [...movieItems, ...showItems];
     }
 
-    return result.sort((a, b) => b.airDate - a.airDate);
+    return result;
   }, [filter, showItems, movieItems]);
 
   /**

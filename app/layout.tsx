@@ -37,10 +37,6 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <Providers>
-          {/*
-            WatchingProvider wraps global navigation and notification components
-            to handle UI collisions on responsive views.
-          */}
           <WatchingProvider>
             <main className="flex-1 pb-20">{children}</main>
             <FloatingNav />

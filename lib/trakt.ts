@@ -1,5 +1,6 @@
 import { traktApi, Environment } from "@trakt/api";
 import { cookies } from "next/headers";
+import { ApiRequestError, getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
 
 export type TraktClient = ReturnType<typeof traktApi>;
 
@@ -21,26 +22,33 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
   const redirectUri = process.env.NEXT_PUBLIC_TRAKT_REDIRECT_URI;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    console.error("[Trakt Auth] Critical: Missing OAuth environment variables for token refresh.");
+    console.error("[Trakt Auth] Critical: Missing OAuth environment variables.");
     return null;
   }
 
   try {
-    const response = await fetch("https://api.trakt.tv/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        refresh_token: refreshToken,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: "refresh_token",
-      }),
-    });
+    const response = await requestWithPolicy(
+      "https://api.trakt.tv/oauth/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          refresh_token: refreshToken,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: "refresh_token",
+        }),
+      },
+      {
+        timeoutMs: 10000,
+        maxRetries: 0,
+      },
+    );
 
     if (!response.ok) {
-      const errorData = await response.text();
-      console.error(`[Trakt Auth] Refresh failed. Status: ${response.status} | Data: ${errorData}`);
+      const details = await getResponseErrorDetails(response);
+      console.error(`[Trakt Auth] Refresh failed: ${response.status} | ${details.message}`);
       return null;
     }
 
@@ -49,7 +57,6 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
     try {
       const cookieStore = await cookies();
 
-      // Tokens are persisted in cookies for subsequent server-side requests
       cookieStore.set("trakt_access_token", data.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -63,10 +70,8 @@ async function refreshTraktToken(refreshToken: string): Promise<string | null> {
         path: "/",
         maxAge: 60 * 60 * 24 * 90, // 90 days
       });
-    } catch (e) {
-      console.warn(
-        "[Trakt Auth] Warning: Could not update cookies (not in a Server Action or Route Handler).",
-      );
+    } catch {
+      // Silently fail if cookies cannot be set in this context
     }
 
     return data.access_token;
@@ -86,7 +91,7 @@ export function createTraktClient(
   const clientId = process.env.TRAKT_CLIENT_ID;
 
   if (!clientId) {
-    console.error("[Trakt Config] Error: TRAKT_CLIENT_ID is not defined in environment variables.");
+    console.error("[Trakt Config] Error: TRAKT_CLIENT_ID is not defined.");
   }
 
   return traktApi({
@@ -96,36 +101,33 @@ export function createTraktClient(
       let accessToken = providedAccessToken;
       let refreshToken = providedRefreshToken;
 
-      // Attempt to retrieve tokens from cookies if not explicitly provided
+      // Only attempt to access cookies if tokens are not provided
       if (!accessToken || !refreshToken) {
         try {
           const cookieStore = await cookies();
           accessToken = accessToken || cookieStore.get("trakt_access_token")?.value;
           refreshToken = refreshToken || cookieStore.get("trakt_refresh_token")?.value;
-        } catch (e) {
-          console.warn("[Trakt API] Warning: Unable to access cookies in this context.");
+        } catch {
+          // Silently fail if cookies are inaccessible (e.g., static rendering context)
         }
       }
 
-      // Check if the endpoint requires user authentication
+      const urlString = url.toString();
       const isPrivateEndpoint =
-        url.toString().includes("/users/me") || url.toString().includes("/sync");
+        urlString.includes("/users/me") ||
+        urlString.includes("/sync") ||
+        urlString.includes("/checkin");
 
       if (isPrivateEndpoint && !accessToken) {
-        throw new Error(
-          `TRAKT_OAUTH_REQUIRED: The endpoint ${url} requires an access token, but none was found in parameters or cookies.`,
-        );
+        throw new Error(`TRAKT_OAUTH_REQUIRED: ${urlString} requires authentication.`);
       }
 
-      /**
-       * Helper to generate headers for every request
-       */
       const buildHeaders = (token?: string) => {
         const headers = new Headers(init?.headers);
         headers.set("trakt-api-version", "2");
         headers.set("trakt-api-key", clientId || "");
         headers.set("Content-Type", "application/json");
-        headers.set("User-Agent", "Pletra/1.0 (Next.js Managed Client)");
+        headers.set("User-Agent", "Pletra/1.0 (Next.js Managed)");
 
         if (token) {
           headers.set("Authorization", `Bearer ${token}`);
@@ -134,48 +136,43 @@ export function createTraktClient(
         return headers;
       };
 
-      // Initial request attempt
-      let response = await fetch(url, {
-        ...init,
-        headers: buildHeaders(accessToken),
-        cache: "no-store", // Ensure we get fresh data for sync/progress
-      });
+      const executeRequest = async (token?: string) =>
+        requestWithPolicy(
+          url,
+          {
+            ...init,
+            headers: buildHeaders(token),
+            cache: "no-store",
+          },
+          {
+            timeoutMs: 10000,
+            maxRetries: isPrivateEndpoint ? 1 : 2,
+          },
+        );
 
-      // Handle 401 Unauthorized (Expired Token)
+      let response = await executeRequest(accessToken);
+
+      // Handle 401 Unauthorized by attempting a token refresh
       if (response.status === 401 && refreshToken) {
-        console.log(`[Trakt API] 401 detected for ${url}. Attempting token refresh...`);
         const newAccessToken = await refreshTraktToken(refreshToken);
 
         if (newAccessToken) {
-          console.log(`[Trakt API] Refresh successful. Retrying request to ${url}`);
-          response = await fetch(url, {
-            ...init,
-            headers: buildHeaders(newAccessToken),
-            cache: "no-store",
-          });
+          response = await executeRequest(newAccessToken);
         }
       }
 
-      // Final error handling
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(
-          `[Trakt API Error] Endpoint: ${url} | Status: ${response.status} | Body: ${errorText}`,
-        );
+        const details = await getResponseErrorDetails(response);
 
         if (response.status === 403) {
-          throw new Error(
-            "TRAKT_FORBIDDEN: Access denied. Check your API Key permissions, token scope, or endpoint validity.",
-          );
+          throw new Error("TRAKT_FORBIDDEN: Check API permissions or scopes.");
         }
 
         if (response.status === 401) {
-          throw new Error(
-            "TRAKT_UNAUTHORIZED: Authentication failed and refresh was not possible.",
-          );
+          throw new Error("TRAKT_UNAUTHORIZED: Token refresh failed.");
         }
 
-        throw new Error(`Trakt API failure [${response.status}]: ${errorText}`);
+        throw new ApiRequestError(details.message, response.status, details);
       }
 
       return response;

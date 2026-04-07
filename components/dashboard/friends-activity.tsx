@@ -328,6 +328,18 @@ export async function FriendsActivity() {
     return `${Math.floor(hours / 24)}d ago`;
   }
 
+  function formatExactDate(dateStr?: string) {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+
   return (
     <div className="w-full px-1 sm:px-0">
       <CardGrid
@@ -349,6 +361,7 @@ export async function FriendsActivity() {
                 ids={item.ids}
                 episodeIds={item.episodeIds}
                 timeBadge={formatTimeAgo(item.watched_at)}
+                timeBadgeTooltip={formatExactDate(item.watched_at)}
                 showInlineActions={true}
                 variant="landscape"
                 isWatched={item.isWatched}

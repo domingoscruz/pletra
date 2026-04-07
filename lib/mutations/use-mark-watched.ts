@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { traktKeys } from "@/lib/queries/keys";
 
@@ -26,17 +27,23 @@ export function useMarkWatched() {
         payload.watched_at = watchedAt;
       }
 
-      const res = await fetch(endpoint, {
-        method: "POST", // O Trakt usa POST para ambas as rotas
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          [type]: [payload],
-        }),
-      });
-
-      if (!res.ok)
-        throw new Error(isRemoving ? "Failed to remove from history" : "Failed to mark as watched");
-      return res.json();
+      try {
+        return await fetchTraktRouteJson(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            [type]: [payload],
+          }),
+          timeoutMs: 10000,
+        });
+      } catch (error) {
+        throw new Error(
+          getErrorMessage(
+            error,
+            isRemoving ? "Failed to remove from history" : "Failed to mark as watched",
+          ),
+        );
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: traktKeys.upNext() });
