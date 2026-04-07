@@ -81,6 +81,9 @@ export interface ProgressShowItem {
     season: number;
     number: number;
     title: string;
+    traktId?: number;
+    historyId?: number;
+    watchedAt?: string | null;
   };
   seasons: ProgressSeasonItem[];
   nextEpisode: NextEpisodeDetails | null;
@@ -128,6 +131,10 @@ const formatRelativeTime = (dateString: string): string => {
   const days = Math.floor(diffInHours / 24);
   if (days >= 30) {
     const months = Math.floor(days / 30);
+    if (months >= 12) {
+      const years = Math.floor(months / 12);
+      return years === 1 ? "1 year ago" : `${years} years ago`;
+    }
     if (months <= 1) return "a month ago";
     return `${months} months ago`;
   }
@@ -378,13 +385,16 @@ const getProgressPercentage = (aired: number, completed: number) =>
 
 const formatSeasonSummary = (season: ProgressSeasonItem) => {
   const remainingEpisodes = Math.max(0, season.aired - season.completed);
+  const replayCount = Math.max(0, season.plays - season.completed);
+  const replaySuffix =
+    replayCount > 0 ? ` - ${replayCount} ${replayCount === 1 ? "replay" : "replays"}` : "";
 
   if (season.completed >= season.aired && season.aired > 0) {
-    return `${season.completed}/${season.aired} episodes - ${season.plays} plays (${formatDuration(season.runtimeWatched)})`;
+    return `${season.completed}/${season.aired} episodes - ${season.plays} plays (${formatDuration(season.runtimeWatched)})${replaySuffix}`;
   }
 
   if (season.completed > 0) {
-    return `${season.completed}/${season.aired} episodes - ${season.plays} plays (${formatDuration(season.runtimeWatched)}) - ${remainingEpisodes} remaining (${formatDuration(season.runtimeLeft)})`;
+    return `${season.completed}/${season.aired} episodes - ${season.plays} plays (${formatDuration(season.runtimeWatched)})${replaySuffix} - ${remainingEpisodes} remaining (${formatDuration(season.runtimeLeft)})`;
   }
 
   return `0/${season.aired} episodes - ${remainingEpisodes} remaining (${formatDuration(season.runtimeLeft)})`;
@@ -430,6 +440,11 @@ function SeasonEpisodeLink({
             )}
           </svg>
           <span>{formatEpisodeCode(episode.season, episode.number)}</span>
+          {episode.plays > 1 && (
+            <span className="text-[10px] font-black uppercase tracking-wide text-white/55">
+              x{episode.plays}
+            </span>
+          )}
         </Link>
       </span>
 
@@ -635,9 +650,16 @@ function SeasonProgressRow({
   );
 }
 
-function Toast({ message }: { message: string }) {
+function Toast({ message, type = "success" }: { message: string; type?: "success" | "error" }) {
   return createPortal(
-    <div className="fixed bottom-6 left-6 z-[10000] rounded-lg border border-white/10 bg-zinc-900 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl animate-in slide-in-from-left-4">
+    <div
+      className={cn(
+        "fixed bottom-6 left-6 z-[10000] rounded-lg px-5 py-3 text-[10px] font-black uppercase tracking-widest shadow-2xl animate-in slide-in-from-left-4",
+        type === "success"
+          ? "border border-green-700 bg-green-700 text-white"
+          : "border border-red-700 bg-red-700 text-white",
+      )}
+    >
       {message}
     </div>,
     document.body,
@@ -650,7 +672,17 @@ interface HistoryMenuProps {
   triggerRef: React.RefObject<HTMLDivElement | null>;
   releasedAt?: string | null;
   nextEpisodeTraktId?: number;
+  showTraktId: number;
+  lastEpisodeTraktId?: number;
+  lastEpisodeHistoryId?: number;
+  lastEpisodeWatchedAt?: string | null;
+  manageHistoryMode?: boolean;
   onToast: (message: string) => void;
+  onLocalUpdate?: (update: {
+    type: "watch-next" | "add-play";
+    traktId: number;
+    watchedAt: string;
+  }) => void;
   onRefresh: () => void;
 }
 
@@ -660,10 +692,17 @@ function ProgressHistoryMenu({
   triggerRef,
   releasedAt,
   nextEpisodeTraktId,
+  showTraktId,
+  lastEpisodeTraktId,
+  lastEpisodeHistoryId,
+  lastEpisodeWatchedAt,
+  manageHistoryMode = false,
   onToast,
+  onLocalUpdate,
   onRefresh,
 }: HistoryMenuProps) {
   const [showOtherDatePicker, setShowOtherDatePicker] = useState(false);
+  const [showAddPlayOptions, setShowAddPlayOptions] = useState(false);
   const [showMonthSelect, setShowMonthSelect] = useState(false);
   const [showYearSelect, setShowYearSelect] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -741,6 +780,7 @@ function ProgressHistoryMenu({
     if (!isOpen) return;
     setSelectedDate(getNearestQuarterHour(new Date()));
     setShowOtherDatePicker(false);
+    setShowAddPlayOptions(false);
     setShowMonthSelect(false);
     setShowYearSelect(false);
   }, [isOpen, getNearestQuarterHour]);
@@ -787,23 +827,113 @@ function ProgressHistoryMenu({
   const handleWatchAction = async (dateString?: string) => {
     if (!nextEpisodeTraktId || isLoading) return;
     setIsLoading(true);
+    const watchedAt = dateString ?? new Date().toISOString();
 
     const result = await syncTraktData(
       {
         type: "episodes",
         ids: { trakt: nextEpisodeTraktId },
         action: "add",
-        date: dateString,
+        date: watchedAt,
       },
       "history",
     );
 
     if (result.ok) {
+      onLocalUpdate?.({ type: "watch-next", traktId: nextEpisodeTraktId, watchedAt });
       onToast("Watched!");
-      onRefresh();
       onClose();
     } else {
       onToast(result.message ?? "Failed to update history.");
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleAddPlayToLastEpisode = async (dateString?: string) => {
+    if (!lastEpisodeTraktId || isLoading) return;
+    setIsLoading(true);
+    const watchedAt = dateString ?? new Date().toISOString();
+
+    const result = await syncTraktData(
+      {
+        type: "episodes",
+        ids: { trakt: lastEpisodeTraktId },
+        action: "add",
+        date: watchedAt,
+      },
+      "history",
+    );
+
+    if (result.ok) {
+      onLocalUpdate?.({ type: "add-play", traktId: lastEpisodeTraktId, watchedAt });
+      onToast("Watched!");
+      onClose();
+    } else {
+      onToast(result.message ?? "Failed to update history.");
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleRemoveThisPlay = async () => {
+    if ((!lastEpisodeHistoryId && (!lastEpisodeTraktId || !lastEpisodeWatchedAt)) || isLoading)
+      return;
+    setIsLoading(true);
+
+    const result = lastEpisodeHistoryId
+      ? await (async (): Promise<{ ok: boolean; message?: string }> => {
+          try {
+            await fetchTraktRouteJson("/api/trakt/sync/history/remove", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids: [lastEpisodeHistoryId] }),
+              timeoutMs: 10000,
+            });
+            return { ok: true };
+          } catch (error) {
+            return { ok: false, message: getErrorMessage(error, "Failed to remove play.") };
+          }
+        })()
+      : await syncTraktData(
+          {
+            type: "episodes",
+            ids: { trakt: lastEpisodeTraktId },
+            action: "remove",
+            date: lastEpisodeWatchedAt ?? undefined,
+          },
+          "history",
+        );
+
+    if (result.ok) {
+      onToast("Removed play.");
+      onClose();
+    } else {
+      onToast(result.message ?? "Failed to remove play.");
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleRemoveAllPlays = async () => {
+    if (!showTraktId || isLoading) return;
+    setIsLoading(true);
+
+    const result = await syncTraktData(
+      {
+        type: "shows",
+        ids: { trakt: showTraktId },
+        action: "remove",
+      },
+      "history",
+    );
+
+    if (result.ok) {
+      onToast("Removed all plays.");
+      onRefresh();
+      onClose();
+    } else {
+      onToast(result.message ?? "Failed to remove all plays.");
     }
 
     setIsLoading(false);
@@ -821,6 +951,25 @@ function ProgressHistoryMenu({
       });
       onToast("Watching now!");
       onRefresh();
+      onClose();
+    } catch (error) {
+      onToast(getErrorMessage(error, "Check-in failed"));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCheckinLastEpisode = async () => {
+    if (!lastEpisodeTraktId || isLoading) return;
+    setIsLoading(true);
+    try {
+      await fetchTraktRouteJson("/api/trakt/checkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episode: { ids: { trakt: lastEpisodeTraktId } } }),
+        timeoutMs: 10000,
+      });
+      onToast("Watching now!");
       onClose();
     } catch (error) {
       onToast(getErrorMessage(error, "Check-in failed"));
@@ -919,42 +1068,103 @@ function ProgressHistoryMenu({
           {!showOtherDatePicker ? (
             <>
               <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                Mark Progress
+                {manageHistoryMode ? "Manage History" : "Mark Progress"}
               </p>
               <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleCheckin}
-                  disabled={isLoading}
-                  className="rounded-md bg-purple-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-purple-500 disabled:opacity-50 transition-colors text-center"
-                >
-                  {isLoading ? "Syncing..." : "Check-in"}
-                </button>
-                <button
-                  onClick={() => handleWatchAction(new Date().toISOString())}
-                  className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                >
-                  Just Watched
-                </button>
-                <button
-                  onClick={() =>
-                    releasedAt ? handleWatchAction(new Date(releasedAt).toISOString()) : null
-                  }
-                  className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                >
-                  Release Date
-                </button>
-                <button
-                  onClick={() => handleWatchAction("1970-01-01T00:00:00.000Z")}
-                  className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                >
-                  Unknown Date
-                </button>
-                <button
-                  onClick={() => setShowOtherDatePicker(true)}
-                  className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
-                >
-                  Other Date
-                </button>
+                {manageHistoryMode ? (
+                  <>
+                    {!showAddPlayOptions ? (
+                      <button
+                        onClick={() => setShowAddPlayOptions(true)}
+                        disabled={isLoading || !lastEpisodeTraktId}
+                        className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 disabled:opacity-50 transition-colors text-center"
+                      >
+                        Add Another Play
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={handleCheckinLastEpisode}
+                          disabled={isLoading || !lastEpisodeTraktId}
+                          className="rounded-md bg-purple-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-purple-500 disabled:opacity-50 transition-colors text-center"
+                        >
+                          {isLoading ? "Syncing..." : "Check-in"}
+                        </button>
+                        <button
+                          onClick={() => handleAddPlayToLastEpisode(new Date().toISOString())}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Just Watched
+                        </button>
+                        <button
+                          onClick={() =>
+                            releasedAt
+                              ? handleAddPlayToLastEpisode(new Date(releasedAt).toISOString())
+                              : null
+                          }
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Release Date
+                        </button>
+                        <button
+                          onClick={() => handleAddPlayToLastEpisode("1970-01-01T00:00:00.000Z")}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Unknown Date
+                        </button>
+                        <button
+                          onClick={() => setShowOtherDatePicker(true)}
+                          className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                        >
+                          Other Date
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={handleRemoveAllPlays}
+                      disabled={isLoading}
+                      className="rounded-md bg-red-600/20 px-3 py-2 text-[10px] font-black uppercase text-red-500 hover:bg-red-600/30 disabled:opacity-50 transition-colors text-center"
+                    >
+                      {isLoading ? "Syncing..." : "Remove All Plays"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleCheckin}
+                      disabled={isLoading}
+                      className="rounded-md bg-purple-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-purple-500 disabled:opacity-50 transition-colors text-center"
+                    >
+                      {isLoading ? "Syncing..." : "Check-in"}
+                    </button>
+                    <button
+                      onClick={() => handleWatchAction(new Date().toISOString())}
+                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                    >
+                      Just Watched
+                    </button>
+                    <button
+                      onClick={() =>
+                        releasedAt ? handleWatchAction(new Date(releasedAt).toISOString()) : null
+                      }
+                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                    >
+                      Release Date
+                    </button>
+                    <button
+                      onClick={() => handleWatchAction("1970-01-01T00:00:00.000Z")}
+                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                    >
+                      Unknown Date
+                    </button>
+                    <button
+                      onClick={() => setShowOtherDatePicker(true)}
+                      className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                    >
+                      Other Date
+                    </button>
+                  </>
+                )}
               </div>
             </>
           ) : (
@@ -1012,7 +1222,11 @@ function ProgressHistoryMenu({
                     </svg>
                   </button>
                   <button
-                    onClick={() => handleWatchAction(selectedDate.toISOString())}
+                    onClick={() =>
+                      manageHistoryMode
+                        ? handleAddPlayToLastEpisode(selectedDate.toISOString())
+                        : handleWatchAction(selectedDate.toISOString())
+                    }
                     className="rounded bg-green-600 p-2 text-white transition-colors hover:bg-green-500"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1287,7 +1501,7 @@ const MenuWrapper = ({
 
 const ProgressShowRow = memo(
   ({
-    item,
+    item: initialItem,
     index,
     barMode,
   }: {
@@ -1297,8 +1511,9 @@ const ProgressShowRow = memo(
   }) => {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
+    const [item, setItem] = useState(initialItem);
     const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
-    const [toast, setToast] = useState<string | null>(null);
+    const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const [userRating, setUserRating] = useState<number | undefined>(item.userRating);
     const [inWatchlist, setInWatchlist] = useState(false);
@@ -1313,6 +1528,10 @@ const ProgressShowRow = memo(
     const checkinButtonRef = useRef<HTMLButtonElement>(null);
     const watchlistButtonRef = useRef<HTMLButtonElement>(null);
     const ratingButtonRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+      setItem(initialItem);
+    }, [initialItem]);
 
     const next = item.nextEpisode;
     const isPriority = index < 2;
@@ -1338,6 +1557,7 @@ const ProgressShowRow = memo(
     const isReturning = item.status?.toLowerCase() === "returning series";
     const showSeriesRibbon =
       Boolean(item.showUserRating) && (isShowEnded || (isReturning && !next));
+    const shouldManageHistory = isComplete && (isShowEnded || (isReturning && !next));
 
     let statusBadge = null;
     if (isShowEnded && isComplete) {
@@ -1374,9 +1594,153 @@ const ProgressShowRow = memo(
       }
     }, [activeMenu]);
 
-    const showToast = useCallback((message: string) => {
-      setToast(message);
+    const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+      setToast({ message, type });
       window.setTimeout(() => setToast(null), 2500);
+    }, []);
+
+    const applyLocalHistoryUpdate = useCallback(
+      ({
+        type,
+        traktId,
+        watchedAt,
+      }: {
+        type: "watch-next" | "add-play";
+        traktId: number;
+        watchedAt: string;
+      }) => {
+        setItem((current) => {
+          const seasons = current.seasons.map((season) => ({
+            ...season,
+            episodes: season.episodes.map((episode) => ({ ...episode })),
+          }));
+
+          let seasonIndex = -1;
+          let episodeIndex = -1;
+          for (let i = 0; i < seasons.length; i++) {
+            const foundIndex = seasons[i].episodes.findIndex(
+              (episode) => episode.traktId === traktId,
+            );
+            if (foundIndex !== -1) {
+              seasonIndex = i;
+              episodeIndex = foundIndex;
+              break;
+            }
+          }
+
+          if (seasonIndex === -1 || episodeIndex === -1) return current;
+
+          const season = seasons[seasonIndex];
+          const episode = season.episodes[episodeIndex];
+          const wasWatched = episode.watched;
+
+          episode.watched = true;
+          episode.plays += 1;
+          episode.lastWatchedAt = watchedAt;
+
+          season.plays += 1;
+          season.runtimeWatched += episode.runtime;
+
+          let completed = current.completed;
+          let runtimeLeft = current.runtimeLeft;
+
+          if (!wasWatched) {
+            season.completed += 1;
+            season.runtimeLeft = Math.max(0, season.runtimeLeft - episode.runtime);
+            completed += 1;
+            runtimeLeft = Math.max(0, runtimeLeft - episode.runtime);
+          }
+
+          let nextEpisode = current.nextEpisode;
+          if (type === "watch-next") {
+            nextEpisode = null;
+            let foundCurrent = false;
+            for (const candidateSeason of seasons) {
+              for (const candidateEpisode of candidateSeason.episodes) {
+                if (!foundCurrent) {
+                  if (candidateEpisode.traktId === traktId) foundCurrent = true;
+                  continue;
+                }
+                if (!candidateEpisode.watched) {
+                  nextEpisode = {
+                    season: candidateEpisode.season,
+                    number: candidateEpisode.number,
+                    title: candidateEpisode.title,
+                    traktId: candidateEpisode.traktId,
+                    imageUrl: current.backdropUrl,
+                    releasedAt: candidateEpisode.firstAired,
+                  };
+                  break;
+                }
+              }
+              if (nextEpisode) break;
+            }
+          }
+
+          return {
+            ...current,
+            seasons,
+            completed,
+            plays: current.plays + 1,
+            runtimeWatched: current.runtimeWatched + episode.runtime,
+            runtimeLeft,
+            lastWatchedAt: watchedAt,
+            lastEpisodeWatched: {
+              season: episode.season,
+              number: episode.number,
+              title: episode.title,
+              traktId: episode.traktId,
+              historyId: undefined,
+              watchedAt,
+            },
+            nextEpisode,
+          };
+        });
+      },
+      [],
+    );
+
+    const applyLocalHistoryRemoval = useCallback(() => {
+      setItem((current) => {
+        const target = current.lastEpisodeWatched;
+        if (!target?.traktId) return current;
+
+        const seasons = current.seasons.map((season) => ({
+          ...season,
+          episodes: season.episodes.map((episode) => ({ ...episode })),
+        }));
+
+        for (const season of seasons) {
+          const episode = season.episodes.find((entry) => entry.traktId === target.traktId);
+          if (!episode || episode.plays <= 0) continue;
+
+          episode.plays -= 1;
+          if (episode.plays <= 0) {
+            episode.plays = 0;
+            episode.watched = false;
+          }
+
+          season.plays = Math.max(0, season.plays - 1);
+          season.runtimeWatched = Math.max(0, season.runtimeWatched - episode.runtime);
+          if (!episode.watched) {
+            season.completed = Math.max(0, season.completed - 1);
+            season.runtimeLeft += episode.runtime;
+          }
+
+          return {
+            ...current,
+            seasons,
+            completed: episode.watched ? current.completed : Math.max(0, current.completed - 1),
+            plays: Math.max(0, current.plays - 1),
+            runtimeWatched: Math.max(0, current.runtimeWatched - episode.runtime),
+            runtimeLeft: episode.watched
+              ? current.runtimeLeft
+              : current.runtimeLeft + episode.runtime,
+          };
+        }
+
+        return current;
+      });
     }, []);
 
     const handleAction = async (
@@ -1408,12 +1772,15 @@ const ProgressShowRow = memo(
         );
 
         if (result.ok) {
-          showToast(action === "add" ? "Success!" : "Removed!");
+          showToast(
+            action === "add" ? "Success!" : "Removed!",
+            action === "add" ? "success" : "error",
+          );
           if (isWatchlist) setInWatchlist(action === "add");
           router.refresh();
           setActiveMenu(null);
         } else {
-          showToast(result.message ?? "Failed to update Trakt.");
+          showToast(result.message ?? "Failed to update Trakt.", "error");
         }
       });
     };
@@ -1443,6 +1810,7 @@ const ProgressShowRow = memo(
       } catch (error) {
         showToast(
           getErrorMessage(error, item.isDropped ? "Failed to restore show" : "Failed to drop show"),
+          "error",
         );
       }
     };
@@ -1727,7 +2095,12 @@ const ProgressShowRow = memo(
                 onMouseLeave={() =>
                   setHoveredAction((current) => (current === "checkin" ? null : current))
                 }
-                className="flex w-12 items-center justify-center bg-purple-600 text-white transition-colors hover:bg-purple-500"
+                className={cn(
+                  "flex w-12 items-center justify-center text-white transition-colors",
+                  shouldManageHistory
+                    ? "bg-green-600 hover:bg-green-500"
+                    : "bg-purple-600 hover:bg-purple-500",
+                )}
               >
                 <svg
                   className="h-4 w-4"
@@ -1797,7 +2170,50 @@ const ProgressShowRow = memo(
           triggerRef={triggerRef}
           releasedAt={next?.releasedAt}
           nextEpisodeTraktId={next?.traktId}
-          onToast={showToast}
+          showTraktId={item.traktId}
+          lastEpisodeTraktId={item.lastEpisodeWatched?.traktId}
+          lastEpisodeHistoryId={item.lastEpisodeWatched?.historyId}
+          lastEpisodeWatchedAt={item.lastEpisodeWatched?.watchedAt}
+          manageHistoryMode={shouldManageHistory}
+          onToast={(message) => {
+            if (message === "Watched!") {
+              const targetEpisode =
+                shouldManageHistory && item.lastEpisodeWatched
+                  ? item.lastEpisodeWatched
+                  : next
+                    ? {
+                        season: next.season,
+                        number: next.number,
+                        title: next.title ?? "",
+                      }
+                    : null;
+
+              if (targetEpisode) {
+                showToast(
+                  `You watched ${formatEpisodeCode(targetEpisode.season, targetEpisode.number)} ${targetEpisode.title}`.trim(),
+                  "success",
+                );
+                return;
+              }
+            }
+
+            if (message === "Removed play." && item.lastEpisodeWatched) {
+              applyLocalHistoryRemoval();
+              showToast(
+                `Unwatched ${formatEpisodeCode(item.lastEpisodeWatched.season, item.lastEpisodeWatched.number)} ${item.lastEpisodeWatched.title}`.trim(),
+                "error",
+              );
+              return;
+            }
+
+            if (message === "Removed all plays.") {
+              showToast(message, "error");
+              return;
+            }
+
+            showToast(message, message.toLowerCase().includes("failed") ? "error" : "success");
+          }}
+          onLocalUpdate={applyLocalHistoryUpdate}
           onRefresh={() => router.refresh()}
         />
 
@@ -1870,15 +2286,15 @@ const ProgressShowRow = memo(
           </div>
         </MenuWrapper>
 
-        {toast && <Toast message={toast} />}
-        {isPending && !toast && <Toast message="Syncing..." />}
+        {toast && <Toast message={toast.message} type={toast.type} />}
+        {isPending && !toast && <Toast message="Syncing..." type="success" />}
         <ActionTooltip
           label={item.isDropped ? "Restore Show" : "Drop This Show"}
           isOpen={hoveredAction === "drop"}
           triggerRef={dropButtonRef}
         />
         <ActionTooltip
-          label="Check-in"
+          label={shouldManageHistory ? "Remove All Plays" : "Check-in"}
           isOpen={hoveredAction === "checkin"}
           triggerRef={checkinButtonRef}
         />
@@ -1937,8 +2353,10 @@ export function ProgressClient({
 
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => navigate(buildUrl({ q: value, page: 1 })), 400);
+  };
+
+  const handleSearchSubmit = () => {
+    navigate(buildUrl({ q: searchInput.trim(), page: 1 }));
   };
 
   return (
@@ -1950,6 +2368,12 @@ export function ProgressClient({
             placeholder="Filter your shows..."
             value={searchInput}
             onChange={(event) => handleSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleSearchSubmit();
+              }
+            }}
             className="h-full w-full border border-white/5 bg-[#1a1a1a] px-5 text-sm text-zinc-200 outline-none transition-colors focus:border-purple-600"
           />
           {isPending && (

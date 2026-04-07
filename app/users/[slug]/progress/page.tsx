@@ -1,9 +1,14 @@
 import { redirect } from "next/navigation";
 import Image from "next/image";
-import { getAuthenticatedTraktClient, isCurrentUser } from "@/lib/trakt-server";
+import {
+  getAuthenticatedTraktClient,
+  getTraktAccessToken,
+  isCurrentUser,
+} from "@/lib/trakt-server";
 import { proxyImageUrl } from "@/lib/image-proxy";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { withLocalCache } from "@/lib/local-cache";
+import { requestWithPolicy } from "@/lib/api/http";
 import { ProgressClient } from "./progress-client";
 
 interface ProgressPageProps {
@@ -38,6 +43,9 @@ export type ProgressShowItem = {
     season: number;
     number: number;
     title: string;
+    traktId?: number;
+    historyId?: number;
+    watchedAt?: string | null;
   };
   seasons: {
     season: number;
@@ -78,6 +86,7 @@ type CachedProgressShowItem = Omit<ProgressShowItem, "userRating" | "showUserRat
 const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
 const PROGRESS_SHOW_DETAIL_TTL_MS = 60_000;
+const TRAKT_API_BASE = "https://api.trakt.tv";
 
 /**
  * Extracts image URLs from Trakt objects based on available types
@@ -141,6 +150,33 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+async function fetchShowHistoryEntries(showId: string) {
+  const accessToken = await getTraktAccessToken();
+  if (!accessToken) return [];
+
+  try {
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "trakt-api-version": "2",
+      "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+      "user-agent": "pletra/1.0",
+    };
+
+    const response = await requestWithPolicy(
+      `${TRAKT_API_BASE}/sync/history/shows/${showId}?limit=1000`,
+      { headers, cache: "no-store" },
+      { timeoutMs: 10000, maxRetries: 1 },
+    ).catch(() => null);
+
+    if (!response?.ok) return [];
+    const data = (await response.json().catch(() => [])) as any[];
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
 async function getCachedProgressShowDetails(
   userKey: string,
   currentTime: Date,
@@ -148,33 +184,37 @@ async function getCachedProgressShowDetails(
   historyItem: any,
 ): Promise<CachedProgressShowItem> {
   const showSlug = historyItem.show.ids.slug;
+  const showTraktId = historyItem.show.ids.trakt;
   const tmdbId = historyItem.show.ids.tmdb;
 
   return withLocalCache(
     `progress-show:${userKey}:${showSlug}`,
     PROGRESS_SHOW_DETAIL_TTL_MS,
     async () => {
-      const [progressRes, summaryRes, seasonsRes, tmdbShowImgs] = await Promise.all([
-        client.shows.progress
-          .watched({
-            params: { id: showSlug },
-            query: { hidden: "false", specials: "false", count_specials: "false" } as any,
-          })
-          .catch(() => null),
-        client.shows
-          .summary({
-            params: { id: showSlug },
-            query: { extended: "full,images" } as any,
-          })
-          .catch(() => null),
-        (client.shows as any)
-          .seasons({
-            params: { id: showSlug },
-            query: { extended: "episodes,full" } as any,
-          })
-          .catch(() => null),
-        fetchTmdbImages(tmdbId, "tv"),
-      ]);
+      const [progressRes, summaryRes, seasonsRes, tmdbShowImgs, historyEntries] = await Promise.all(
+        [
+          client.shows.progress
+            .watched({
+              params: { id: showSlug },
+              query: { hidden: "false", specials: "false", count_specials: "false" } as any,
+            })
+            .catch(() => null),
+          client.shows
+            .summary({
+              params: { id: showSlug },
+              query: { extended: "full,images" } as any,
+            })
+            .catch(() => null),
+          (client.shows as any)
+            .seasons({
+              params: { id: showSlug },
+              query: { extended: "episodes,full" } as any,
+            })
+            .catch(() => null),
+          fetchTmdbImages(tmdbId, "tv"),
+          fetchShowHistoryEntries(String(showTraktId ?? showSlug)),
+        ],
+      );
 
       const progress = progressRes?.status === 200 ? (progressRes.body as any) : null;
       const summary = summaryRes?.status === 200 ? (summaryRes.body as any) : null;
@@ -183,6 +223,43 @@ async function getCachedProgressShowDetails(
       const progressSeasonMap = new Map<number, any>(
         (progress?.seasons ?? []).map((season: any) => [season.number, season]),
       );
+      const normalizedHistoryEntries = historyEntries
+        .filter(
+          (entry: any) =>
+            entry?.episode?.season > 0 &&
+            entry?.episode?.number > 0 &&
+            typeof entry.watched_at === "string",
+        )
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
+        );
+      const episodeHistoryMap = new Map<
+        string,
+        { plays: number; lastWatchedAt: string | null; playDates: string[] }
+      >();
+
+      normalizedHistoryEntries.forEach((entry: any) => {
+        const key = `${entry.episode.season}-${entry.episode.number}`;
+        const existing = episodeHistoryMap.get(key);
+        if (existing) {
+          existing.plays += 1;
+          existing.playDates.push(entry.watched_at);
+          if (
+            !existing.lastWatchedAt ||
+            new Date(entry.watched_at).getTime() > new Date(existing.lastWatchedAt).getTime()
+          ) {
+            existing.lastWatchedAt = entry.watched_at;
+          }
+          return;
+        }
+
+        episodeHistoryMap.set(key, {
+          plays: 1,
+          lastWatchedAt: entry.watched_at,
+          playDates: [entry.watched_at],
+        });
+      });
 
       const seasonItems: ProgressSeasonBreakdown[] = allSeasons
         .filter((season: any) => season.number > 0)
@@ -204,17 +281,22 @@ async function getCachedProgressShowDetails(
             .sort((a: any, b: any) => a.number - b.number)
             .map((episode: any) => {
               const episodeProgress = progressEpisodeMap.get(episode.number);
+              const episodeHistory = episodeHistoryMap.get(`${season.number}-${episode.number}`);
               const episodeRuntime = episode.runtime ?? runtime;
-              const plays = episodeProgress?.plays ?? (episodeProgress?.completed ? 1 : 0);
+              const plays =
+                episodeHistory?.plays ??
+                episodeProgress?.plays ??
+                (episodeProgress?.completed ? 1 : 0);
 
               return {
                 season: season.number,
                 number: episode.number,
                 title: episode.title ?? "",
                 traktId: episode.ids?.trakt,
-                watched: Boolean(episodeProgress?.completed),
+                watched: plays > 0 || Boolean(episodeProgress?.completed),
                 plays,
-                lastWatchedAt: episodeProgress?.last_watched_at ?? null,
+                lastWatchedAt:
+                  episodeHistory?.lastWatchedAt ?? episodeProgress?.last_watched_at ?? null,
                 runtime: episodeRuntime,
                 firstAired: episode.first_aired ?? null,
               };
@@ -257,14 +339,31 @@ async function getCachedProgressShowDetails(
       if (progress && allSeasons.length > 0) {
         let latestWatchedAt = 0;
 
-        if (progress.seasons) {
+        if (normalizedHistoryEntries.length > 0) {
+          const latestHistoryEntry = normalizedHistoryEntries[0];
+          trueLastEpisode = {
+            season: latestHistoryEntry.episode.season,
+            number: latestHistoryEntry.episode.number,
+            title: latestHistoryEntry.episode.title ?? "",
+            traktId: latestHistoryEntry.episode.ids?.trakt,
+            historyId: latestHistoryEntry.id,
+            watchedAt: latestHistoryEntry.watched_at,
+          };
+        } else if (progress.seasons) {
           progress.seasons.forEach((s: any) => {
             s.episodes.forEach((e: any) => {
               if (e.completed && e.last_watched_at) {
                 const watchedTime = new Date(e.last_watched_at).getTime();
                 if (watchedTime > latestWatchedAt) {
                   latestWatchedAt = watchedTime;
-                  trueLastEpisode = { season: s.number, number: e.number, title: "" };
+                  trueLastEpisode = {
+                    season: s.number,
+                    number: e.number,
+                    title: "",
+                    traktId: e.ids?.trakt,
+                    historyId: undefined,
+                    watchedAt: e.last_watched_at,
+                  };
                 }
               }
             });
@@ -381,8 +480,31 @@ async function getCachedProgressShowDetails(
       );
       const totalAired = aggregatedAired || (progress?.aired ?? 0);
       const completed = aggregatedCompleted || (progress?.completed ?? 0);
+      const watchedShowPlays = historyItem.plays ?? 0;
+      const totalPlays = Math.max(aggregatedPlays, watchedShowPlays);
+      const totalRuntimeWatched = Math.max(aggregatedRuntimeWatched, totalPlays * runtime);
       const showStatus = summary?.status?.toLowerCase() || "";
       const isComplete = totalAired > 0 && completed >= totalAired;
+
+      if (calculatedNextEp) {
+        const sortedSeasonItems = [...seasonItems].sort((a, b) => a.season - b.season);
+        const lastSeason = sortedSeasonItems[sortedSeasonItems.length - 1];
+        const lastEpisode = lastSeason?.episodes[lastSeason.episodes.length - 1];
+        const isAbsoluteLastEpisode =
+          lastSeason &&
+          lastEpisode &&
+          calculatedNextEp.season === lastSeason.season &&
+          calculatedNextEp.number === lastEpisode.number;
+
+        if (isAbsoluteLastEpisode) {
+          if (["ended", "canceled", "cancelled"].includes(showStatus)) {
+            isSeriesFinale = true;
+            isSeasonFinale = false;
+          } else if (!isSeriesFinale) {
+            isSeasonFinale = true;
+          }
+        }
+      }
 
       if (isComplete) {
         const nextAirDate = calculatedNextEp?.releasedAt
@@ -409,9 +531,13 @@ async function getCachedProgressShowDetails(
         const traktEp = calculatedNextEp.rawEpisode
           ? extractTraktImage(calculatedNextEp.rawEpisode, ["screenshot", "thumb"])
           : null;
+        const traktProgressEp = progress?.next_episode
+          ? extractTraktImage(progress.next_episode, ["screenshot", "thumb"])
+          : null;
         epImageUrl =
           tmdbEp.still ||
           traktEp ||
+          traktProgressEp ||
           tmdbShowImgs.backdrop ||
           extractTraktImage(summary, ["fanart"]);
       }
@@ -450,8 +576,8 @@ async function getCachedProgressShowDetails(
         backdropUrl: proxyImageUrl(tmdbShowImgs.backdrop || traktBackdrop),
         aired: totalAired,
         completed,
-        plays: aggregatedPlays || historyItem.plays || 0,
-        runtimeWatched: aggregatedRuntimeWatched || completed * runtime,
+        plays: totalPlays,
+        runtimeWatched: totalRuntimeWatched || completed * runtime,
         runtimeLeft: aggregatedRuntimeLeft || Math.max(0, totalAired - completed) * runtime,
         lastWatchedAt: historyItem.last_watched_at || null,
         lastEpisodeWatched: trueLastEpisode
@@ -459,12 +585,18 @@ async function getCachedProgressShowDetails(
               season: trueLastEpisode.season,
               number: trueLastEpisode.number,
               title: trueLastEpisode.title,
+              traktId: trueLastEpisode.traktId,
+              historyId: trueLastEpisode.historyId,
+              watchedAt: trueLastEpisode.watchedAt ?? null,
             }
           : progress?.last_episode
             ? {
                 season: progress.last_episode.season,
                 number: progress.last_episode.number,
                 title: progress.last_episode.title,
+                traktId: progress.last_episode.ids?.trakt,
+                historyId: undefined,
+                watchedAt: historyItem.last_watched_at || null,
               }
             : undefined,
         seasons: seasonItems,

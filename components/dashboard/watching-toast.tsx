@@ -170,7 +170,7 @@ export function WatchingToast() {
           cache: "no-store",
           headers: { "X-Poll-Request": "true" },
           timeoutMs: 10000,
-          maxRetries: 2,
+          maxRetries: 0,
         },
       );
 
@@ -237,11 +237,26 @@ export function WatchingToast() {
         }
       }
     } catch (error) {
-      if (error instanceof ApiRequestError && error.status === 429) {
-        setBackoffMs((prev) => Math.min(prev + 60000, 300000));
+      if (error instanceof ApiRequestError) {
+        if (error.status === 429) {
+          setBackoffMs((prev) => Math.min(prev + 60000, 300000));
+          return;
+        }
+
+        if (error.status === 504 || error.code === "REQUEST_TIMEOUT") {
+          setBackoffMs((prev) => Math.min(Math.max(prev, 120000) + 60000, 600000));
+          return;
+        }
+
+        if (error.status >= 500) {
+          setBackoffMs((prev) => Math.min(Math.max(prev, 60000) + 60000, 300000));
+          return;
+        }
+      }
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        setBackoffMs((prev) => Math.min(Math.max(prev, 120000) + 60000, 600000));
         return;
       }
-      console.error("[WatchingToast] Check error:", error);
     } finally {
       isFetching.current = false;
     }
@@ -260,7 +275,7 @@ export function WatchingToast() {
       if (isClosedManually || isRatingPhase || progressRef.current >= PROGRESS_THRESHOLD) return;
 
       checkWatching();
-      const interval = document.hidden ? 180000 : progressRef.current > 85 ? 30000 : 60000;
+      const interval = document.hidden ? 300000 : progressRef.current > 85 ? 60000 : 120000;
       pollTimer.current = setTimeout(runPolling, interval + backoffMs);
     };
     runPolling();

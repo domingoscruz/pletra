@@ -104,9 +104,28 @@ interface CardActionsProps {
   mediaType: "movies" | "shows" | "episodes";
   ids: Record<string, any>;
   episodeIds?: Record<string, any>;
+  historyId?: number;
+  eventItem?: {
+    title: string;
+    subtitle?: string;
+    href: string;
+    showHref?: string;
+    backdropUrl: string | null;
+    rating?: number | null;
+    userRating?: number;
+    releasedAt?: string;
+    variant?: "landscape" | "poster";
+    specialTag?:
+      | "Series Premiere"
+      | "Season Premiere"
+      | "Season Finale"
+      | "Series Finale"
+      | "New Episode";
+  };
   userRating?: number;
   globalRating?: number | null;
   releasedAt?: string;
+  watchedAt?: string;
   isWatched?: boolean;
   isInWatchlist?: boolean;
   onRate?: (rating: number) => void;
@@ -116,9 +135,12 @@ export function CardActions({
   mediaType,
   ids,
   episodeIds,
+  historyId,
+  eventItem,
   userRating,
   globalRating,
   releasedAt,
+  watchedAt,
   isWatched = false,
   isInWatchlist = false,
   onRate,
@@ -299,19 +321,52 @@ export function CardActions({
     setShowWatchOptions(false);
     setShowAddAnotherPlay(false);
 
-    const result = await syncTraktData(
-      {
-        type: episodeIds ? "episodes" : mediaType,
-        ids: targetIds,
-        action,
-        date: dateString,
-      },
-      "history",
-    );
+    const result =
+      action === "remove" && historyId
+        ? await (async (): Promise<SyncResult> => {
+            try {
+              await fetchTraktRouteJson("/api/trakt/sync/history/remove", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: [historyId] }),
+                timeoutMs: 10000,
+              });
+              return { ok: true };
+            } catch (error) {
+              return {
+                ok: false,
+                message: getErrorMessage(error, "Failed to sync with Trakt."),
+              };
+            }
+          })()
+        : await syncTraktData(
+            {
+              type: episodeIds ? "episodes" : mediaType,
+              ids: targetIds,
+              action,
+              date: dateString,
+            },
+            "history",
+          );
 
     if (result.ok) {
       setToastMessage(action === "add" ? "Watched!" : "Removed!");
-      router.refresh();
+      window.dispatchEvent(
+        new CustomEvent("trakt-history-updated", {
+          detail: {
+            action,
+            mediaType,
+            traktId,
+            episodeTraktId: episodeIds?.trakt ? Number(episodeIds.trakt) : null,
+            watchedAt: dateString ?? watchedAt ?? null,
+            historyId: historyId ?? null,
+            item: eventItem ?? null,
+          },
+        }),
+      );
+      if (mediaType === "movies" && !episodeIds) {
+        router.refresh();
+      }
     } else {
       setWatched(action !== "add");
       setToastMessage(result.message ?? "Failed to update history.");
@@ -562,11 +617,19 @@ export function CardActions({
                         >
                           Add Another Play
                         </button>
+                        {watchedAt && (
+                          <button
+                            onClick={() => handleWatchAction("remove", watchedAt)}
+                            className="rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-zinc-700 transition-colors text-center"
+                          >
+                            Remove This Play
+                          </button>
+                        )}
                         <button
                           onClick={() => handleWatchAction("remove")}
                           className="rounded-md bg-red-600/20 px-3 py-2 text-[10px] font-black uppercase text-red-500 hover:bg-red-600/30 transition-colors text-center"
                         >
-                          Remove from History
+                          Remove All Plays
                         </button>
                       </>
                     )}

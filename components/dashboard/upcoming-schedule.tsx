@@ -13,6 +13,7 @@ import {
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
+import { measureAsync } from "@/lib/perf";
 import { getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
 import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
 
@@ -77,171 +78,189 @@ const formatScheduleTooltip = (dateStr: string, timeZone?: string) =>
   });
 
 async function fetchDroppedShowIds() {
-  const accessToken = await getTraktAccessToken();
-  const clientId = process.env.TRAKT_CLIENT_ID;
+  return measureAsync("dashboard:upcoming-schedule:dropped-shows", () =>
+    withLocalCache(
+      "dashboard:upcoming-schedule:dropped-shows:me",
+      UPCOMING_SCHEDULE_CACHE_TTL_MS,
+      async () => {
+        const accessToken = await getTraktAccessToken();
+        const clientId = process.env.TRAKT_CLIENT_ID;
 
-  if (!accessToken || !clientId) {
-    return new Set<number>();
-  }
+        if (!accessToken || !clientId) {
+          return new Set<number>();
+        }
 
-  const response = await requestWithPolicy("https://api.trakt.tv/users/hidden/dropped?type=show", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "trakt-api-key": clientId,
-      "trakt-api-version": "2",
-      "user-agent": "pletra/1.0",
-    },
-    cache: "no-store",
-  });
+        const response = await requestWithPolicy(
+          "https://api.trakt.tv/users/hidden/dropped?type=show",
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+              "trakt-api-key": clientId,
+              "trakt-api-version": "2",
+              "user-agent": "pletra/1.0",
+            },
+            cache: "no-store",
+          },
+        );
 
-  if (!response.ok) {
-    const details = await getResponseErrorDetails(response);
-    console.error("[UpcomingSchedule] Failed to fetch dropped shows:", details.message);
-    return new Set<number>();
-  }
+        if (!response.ok) {
+          const details = await getResponseErrorDetails(response);
+          console.error("[UpcomingSchedule] Failed to fetch dropped shows:", details.message);
+          return new Set<number>();
+        }
 
-  const items = (await response.json().catch(() => [])) as any[];
-  const hiddenShowIds = new Set<number>();
+        const items = (await response.json().catch(() => [])) as any[];
+        const hiddenShowIds = new Set<number>();
 
-  if (Array.isArray(items)) {
-    items.forEach((item: any) => {
-      if (item.show?.ids?.trakt) hiddenShowIds.add(item.show.ids.trakt);
-    });
-  }
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (item.show?.ids?.trakt) hiddenShowIds.add(item.show.ids.trakt);
+          });
+        }
 
-  return hiddenShowIds;
+        return hiddenShowIds;
+      },
+    ),
+  );
 }
 
 async function getCachedUpcomingScheduleItems(userKey: string) {
-  return withLocalCache(
-    `dashboard:upcoming-schedule:${userKey}`,
-    UPCOMING_SCHEDULE_CACHE_TTL_MS,
-    async () => {
-      const now = new Date();
-      const todayStr = now.toISOString().split("T")[0];
-      const client = await getAuthenticatedTraktClient();
-      const settings = await getUserSettings();
-      const timeZone = settings?.account?.timezone;
+  return measureAsync(
+    "dashboard:upcoming-schedule:data",
+    () =>
+      withLocalCache(
+        `dashboard:upcoming-schedule:${userKey}`,
+        UPCOMING_SCHEDULE_CACHE_TTL_MS,
+        async () => {
+          const now = new Date();
+          const todayStr = now.toISOString().split("T")[0];
+          const client = await getAuthenticatedTraktClient();
+          const settings = await getUserSettings();
+          const timeZone = settings?.account?.timezone;
 
-      const [showsRes, moviesRes] = await Promise.all([
-        client.calendars.shows({
-          params: { target: "my", start_date: todayStr, days: 30 },
-          query: { extended: "full" },
-        }),
-        client.calendars.movies({
-          params: { target: "my", start_date: todayStr, days: 30 },
-          query: { extended: "full" },
-        }),
-      ]);
+          const [showsRes, moviesRes] = await Promise.all([
+            client.calendars.shows({
+              params: { target: "my", start_date: todayStr, days: 30 },
+              query: { extended: "full" },
+            }),
+            client.calendars.movies({
+              params: { target: "my", start_date: todayStr, days: 30 },
+              query: { extended: "full" },
+            }),
+          ]);
 
-      if (showsRes.status === 401 || moviesRes.status === 401) {
-        console.error("[UpcomingSchedule] Trakt API returned 401 Unauthorized.");
-        return { items: [], generatedAt: now.toISOString() };
-      }
+          if (showsRes.status === 401 || moviesRes.status === 401) {
+            console.error("[UpcomingSchedule] Trakt API returned 401 Unauthorized.");
+            return { items: [], generatedAt: now.toISOString() };
+          }
 
-      const calShows = showsRes.status === 200 ? (showsRes.body as any[]) : [];
-      const calMovies = moviesRes.status === 200 ? (moviesRes.body as any[]) : [];
+          const calShows = showsRes.status === 200 ? (showsRes.body as any[]) : [];
+          const calMovies = moviesRes.status === 200 ? (moviesRes.body as any[]) : [];
 
-      const processedShows: Promise<ScheduleItem | null>[] = calShows.map(async (entry) => {
-        const show = entry.show;
-        const ep = entry.episode;
-        if (!show || !ep) return null;
+          const processedShows: Promise<ScheduleItem | null>[] = calShows.map(async (entry) => {
+            const show = entry.show;
+            const ep = entry.episode;
+            if (!show || !ep) return null;
 
-        const airTimeDate = new Date(entry.first_aired);
-        if (airTimeDate.getTime() < now.getTime()) return null;
+            const airTimeDate = new Date(entry.first_aired);
+            if (airTimeDate.getTime() < now.getTime()) return null;
 
-        const imgs = await fetchTmdbImages(show.ids?.tmdb, "tv").catch(() => null);
-        const epLabel = `${ep.season}x${String(ep.number).padStart(2, "0")}`;
+            const imgs = await fetchTmdbImages(show.ids?.tmdb, "tv").catch(() => null);
+            const epLabel = `${ep.season}x${String(ep.number).padStart(2, "0")}`;
 
-        let statusBadge: string | undefined;
-        if (ep.number === 1) {
-          statusBadge = ep.season === 1 ? "Series Premiere" : "Season Premiere";
-        }
+            let statusBadge: string | undefined;
+            if (ep.number === 1) {
+              statusBadge = ep.season === 1 ? "Series Premiere" : "Season Premiere";
+            }
 
-        return {
-          title: show.title ?? "Unknown",
-          subtitle: `${epLabel} ${ep.title ?? ""}`,
-          href: `/shows/${show.ids?.slug}/seasons/${ep.season}/episodes/${ep.number}`,
-          showHref: show.ids?.slug ? `/shows/${show.ids.slug}` : undefined,
-          backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
-          rating: show.rating ?? 0,
-          mediaType: "episodes" as const,
-          ids: show.ids ?? {},
-          episodeIds: ep.ids ?? {},
-          airTime: airTimeDate.getTime(),
-          releasedAt: entry.first_aired,
-          statusBadge,
-          showTraktId: show.ids?.trakt,
-        };
-      });
+            return {
+              title: show.title ?? "Unknown",
+              subtitle: `${epLabel} ${ep.title ?? ""}`,
+              href: `/shows/${show.ids?.slug}/seasons/${ep.season}/episodes/${ep.number}`,
+              showHref: show.ids?.slug ? `/shows/${show.ids.slug}` : undefined,
+              backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
+              rating: show.rating ?? 0,
+              mediaType: "episodes" as const,
+              ids: show.ids ?? {},
+              episodeIds: ep.ids ?? {},
+              airTime: airTimeDate.getTime(),
+              releasedAt: entry.first_aired,
+              statusBadge,
+              showTraktId: show.ids?.trakt,
+            };
+          });
 
-      const processedMovies: Promise<ScheduleItem | null>[] = calMovies.map(async (entry) => {
-        const movie = entry.movie;
-        if (!movie) return null;
+          const processedMovies: Promise<ScheduleItem | null>[] = calMovies.map(async (entry) => {
+            const movie = entry.movie;
+            if (!movie) return null;
 
-        const releaseDate = new Date(entry.released);
-        if (releaseDate.getTime() < now.getTime()) return null;
+            const releaseDate = new Date(entry.released);
+            if (releaseDate.getTime() < now.getTime()) return null;
 
-        const imgs = await fetchTmdbImages(movie.ids?.tmdb, "movie").catch(() => null);
+            const imgs = await fetchTmdbImages(movie.ids?.tmdb, "movie").catch(() => null);
 
-        return {
-          title: movie.title ?? "Unknown",
-          subtitle: [movie.year, movie.runtime && formatRuntime(movie.runtime)]
-            .filter(Boolean)
-            .join(" · "),
-          href: `/movies/${movie.ids?.slug}`,
-          showHref: undefined,
-          backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
-          rating: movie.rating ?? 0,
-          mediaType: "movies" as const,
-          ids: movie.ids ?? {},
-          airTime: releaseDate.getTime(),
-          releasedAt: entry.released,
-        };
-      });
+            return {
+              title: movie.title ?? "Unknown",
+              subtitle: [movie.year, movie.runtime && formatRuntime(movie.runtime)]
+                .filter(Boolean)
+                .join(" · "),
+              href: `/movies/${movie.ids?.slug}`,
+              showHref: undefined,
+              backdropUrl: imgs?.backdrop ?? imgs?.poster ?? null,
+              rating: movie.rating ?? 0,
+              mediaType: "movies" as const,
+              ids: movie.ids ?? {},
+              airTime: releaseDate.getTime(),
+              releasedAt: entry.released,
+            };
+          });
 
-      const allItems = await Promise.all([...processedShows, ...processedMovies]);
-      const items = allItems
-        .filter((item): item is ScheduleItem => item !== null)
-        .sort((a, b) => a.airTime - b.airTime);
+          const allItems = await Promise.all([...processedShows, ...processedMovies]);
+          const items = allItems
+            .filter((item): item is ScheduleItem => item !== null)
+            .sort((a, b) => a.airTime - b.airTime);
 
-      return {
-        items,
-        generatedAt: now.toISOString(),
-        timeZone,
-      };
-    },
+          return {
+            items,
+            generatedAt: now.toISOString(),
+            timeZone,
+          };
+        },
+      ),
+    { userKey },
   );
 }
 
 export async function UpcomingSchedule() {
-  try {
-    const userKey = (await getCurrentUser())?.slug ?? "me";
-    const { items, generatedAt, timeZone } = await getCachedUpcomingScheduleItems(userKey);
-    const hiddenShowIds = await fetchDroppedShowIds();
+  return measureAsync("dashboard:upcoming-schedule:section", async () => {
+    try {
+      const userKey = (await getCurrentUser())?.slug ?? "me";
+      const { items, generatedAt, timeZone } = await getCachedUpcomingScheduleItems(userKey);
+      const hiddenShowIds = await fetchDroppedShowIds();
 
-    const visibleItems = items.filter((item) =>
-      item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true,
-    );
+      const visibleItems = items.filter((item) =>
+        item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true,
+      );
 
-    if (visibleItems.length === 0) return null;
+      if (visibleItems.length === 0) return null;
 
-    const generatedAtDate = new Date(generatedAt);
+      const generatedAtDate = new Date(generatedAt);
 
-    return (
-      <UpcomingScheduleGrid
-        items={visibleItems.map((item) => ({
-          ...item,
-          timeBadge: formatScheduleBadge(item.releasedAt, generatedAtDate, timeZone),
-          timeBadgeTooltip: formatScheduleTooltip(item.releasedAt, timeZone),
-        }))}
-      />
-    );
-  } catch (error: any) {
-    if (error?.message !== "TRAKT_UNAUTHORIZED") {
-      console.error("[Upcoming Schedule Server Error]:", error);
+      return (
+        <UpcomingScheduleGrid
+          items={visibleItems.map((item) => ({
+            ...item,
+            timeBadge: formatScheduleBadge(item.releasedAt, generatedAtDate, timeZone),
+            timeBadgeTooltip: formatScheduleTooltip(item.releasedAt, timeZone),
+          }))}
+        />
+      );
+    } catch (error: any) {
+      if (error?.message !== "TRAKT_UNAUTHORIZED") {
+        console.error("[Upcoming Schedule Server Error]:", error);
+      }
+      return null;
     }
-    return null;
-  }
+  });
 }

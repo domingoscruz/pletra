@@ -51,7 +51,9 @@ export interface MediaCardProps {
   mediaType: "movies" | "shows" | "episodes";
   ids: Record<string, unknown>;
   episodeIds?: Record<string, unknown>;
+  historyId?: number;
   releasedAt?: string;
+  watchedAt?: string;
   progress?: { aired: number; completed: number };
   totalAired?: number;
   variant?: "landscape" | "poster";
@@ -105,7 +107,9 @@ export function MediaCard({
   mediaType,
   ids,
   episodeIds,
+  historyId,
   releasedAt,
+  watchedAt,
   progress,
   totalAired,
   variant = "landscape",
@@ -397,9 +401,23 @@ export function MediaCard({
             mediaType={mediaType}
             ids={ids}
             episodeIds={episodeIds}
+            historyId={historyId}
+            eventItem={{
+              title,
+              subtitle: typeof subtitle === "string" ? subtitle : undefined,
+              href,
+              showHref,
+              backdropUrl,
+              rating,
+              userRating: optimisticRating || undefined,
+              releasedAt,
+              variant,
+              specialTag,
+            }}
             userRating={optimisticRating || undefined}
             globalRating={typeof rating === "number" ? Math.round(rating * 10) : 0}
             releasedAt={releasedAt}
+            watchedAt={watchedAt}
             isWatched={isWatched}
             isInWatchlist={isInWatchlist}
             onRate={handleRate}
