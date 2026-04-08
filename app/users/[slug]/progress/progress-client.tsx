@@ -41,6 +41,7 @@ export interface ProgressEpisodeItem {
   number: number;
   title: string;
   traktId?: number;
+  rating?: number;
   watched: boolean;
   plays: number;
   lastWatchedAt: string | null;
@@ -1738,6 +1739,7 @@ const ProgressShowRow = memo(
                     number: candidateEpisode.number,
                     title: candidateEpisode.title,
                     traktId: candidateEpisode.traktId,
+                    rating: candidateEpisode.rating,
                     imageUrl: current.backdropUrl,
                     releasedAt: candidateEpisode.firstAired,
                   };

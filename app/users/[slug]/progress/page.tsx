@@ -56,6 +56,7 @@ export type ProgressShowItem = {
       number: number;
       title: string;
       traktId?: number;
+      rating?: number;
       watched: boolean;
       plays: number;
       lastWatchedAt: string | null;
@@ -218,7 +219,7 @@ function findNextEpisodeFromLastWatched(
           traktId: episode.traktId,
           releasedAt: episode.firstAired,
           rawEpisode: null,
-          rating: undefined,
+          rating: episode.rating,
         };
       }
     }
@@ -324,6 +325,7 @@ async function getCachedProgressShowDetails(
                 number: episode.number,
                 title: episode.title ?? "",
                 traktId: episode.ids?.trakt,
+                rating: typeof episode.rating === "number" ? episode.rating : undefined,
                 watched,
                 plays,
                 lastWatchedAt:
