@@ -76,6 +76,8 @@ export type ProgressShowItem = {
 };
 
 type CachedProgressShowItem = Omit<ProgressShowItem, "userRating" | "showUserRating">;
+type CachedProgressEpisodeItem = ProgressShowItem["seasons"][number]["episodes"][number];
+type CachedProgressSeasonItem = ProgressShowItem["seasons"][number];
 
 const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
@@ -157,7 +159,7 @@ async function getCachedProgressShowDetails(
     `progress-show:${userKey}:${showSlug}`,
     PROGRESS_SHOW_DETAIL_TTL_MS,
     async () => {
-      const [progressRes, summaryRes, tmdbShowImgs] = await Promise.all([
+      const [progressRes, summaryRes, seasonsRes, tmdbShowImgs] = await Promise.all([
         client.shows.progress
           .watched({
             params: { id: showSlug },
@@ -170,11 +172,18 @@ async function getCachedProgressShowDetails(
             query: { extended: "full,images" } as any,
           })
           .catch(() => null),
+        (client.shows as any)
+          .seasons({
+            params: { id: showSlug },
+            query: { extended: "episodes,full" } as any,
+          })
+          .catch(() => null),
         fetchTmdbImages(tmdbId, "tv"),
       ]);
 
       const progress = progressRes?.status === 200 ? (progressRes.body as any) : null;
       const summary = summaryRes?.status === 200 ? (summaryRes.body as any) : null;
+      const allSeasons = seasonsRes?.status === 200 ? (seasonsRes.body as any[]) : [];
       const runtime = summary?.runtime ?? 0;
       const traktPoster =
         extractTraktImage(summary, ["poster"]) || extractTraktImage(historyItem.show, ["poster"]);
@@ -188,6 +197,9 @@ async function getCachedProgressShowDetails(
       const totalRuntimeLeft = Math.max(0, totalAired - completed) * runtime;
       const showStatus = summary?.status?.toLowerCase() || "";
       const isComplete = totalAired > 0 && completed >= totalAired;
+      const progressSeasonMap = new Map<number, any>(
+        (progress?.seasons ?? []).map((season: any) => [season.number, season]),
+      );
       const trueLastEpisode = progress?.last_episode
         ? {
             season: progress.last_episode.season,
@@ -266,6 +278,60 @@ async function getCachedProgressShowDetails(
         }
       }
 
+      const seasons: CachedProgressSeasonItem[] = allSeasons
+        .filter((season: any) => season.number > 0)
+        .sort((a: any, b: any) => a.number - b.number)
+        .map((season: any) => {
+          const seasonProgress = progressSeasonMap.get(season.number);
+          const progressEpisodeMap = new Map<number, any>(
+            (seasonProgress?.episodes ?? []).map((episode: any) => [episode.number, episode]),
+          );
+
+          const episodes: CachedProgressEpisodeItem[] = (season.episodes ?? [])
+            .filter((episode: any) => episode.number > 0)
+            .filter((episode: any) => {
+              if (!episode.first_aired) return false;
+
+              const firstAired = new Date(episode.first_aired);
+              return Number.isNaN(firstAired.getTime()) || firstAired <= currentTime;
+            })
+            .sort((a: any, b: any) => a.number - b.number)
+            .map((episode: any) => {
+              const episodeProgress = progressEpisodeMap.get(episode.number);
+              const episodeRuntime = episode.runtime ?? runtime;
+              const plays = episodeProgress?.plays ?? (episodeProgress?.completed ? 1 : 0);
+
+              return {
+                season: season.number,
+                number: episode.number,
+                title: episode.title ?? "",
+                traktId: episode.ids?.trakt,
+                watched: plays > 0 || Boolean(episodeProgress?.completed),
+                plays,
+                lastWatchedAt: episodeProgress?.last_watched_at ?? null,
+                runtime: episodeRuntime,
+                firstAired: episode.first_aired ?? null,
+              };
+            });
+
+          const completedEpisodes = episodes.filter((episode) => episode.watched);
+          const remainingEpisodes = episodes.filter((episode) => !episode.watched);
+
+          return {
+            season: season.number,
+            year: season.year,
+            aired: episodes.length,
+            completed: completedEpisodes.length,
+            plays: episodes.reduce((total, episode) => total + episode.plays, 0),
+            runtimeWatched: completedEpisodes.reduce(
+              (total, episode) => total + episode.runtime * Math.max(episode.plays, 1),
+              0,
+            ),
+            runtimeLeft: remainingEpisodes.reduce((total, episode) => total + episode.runtime, 0),
+            episodes,
+          };
+        });
+
       return {
         title: historyItem.show.title,
         year: historyItem.show.year,
@@ -282,8 +348,8 @@ async function getCachedProgressShowDetails(
         runtimeLeft: totalRuntimeLeft,
         lastWatchedAt: historyItem.last_watched_at || null,
         lastEpisodeWatched: trueLastEpisode,
-        seasonsLoaded: false,
-        seasons: [],
+        seasonsLoaded: true,
+        seasons,
         nextEpisode: calculatedNextEp
           ? {
               season: calculatedNextEp.season,

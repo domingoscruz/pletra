@@ -287,11 +287,18 @@ export function FloatingNav() {
             }`}
             title="Progress"
           >
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="13" width="3.25" height="8" rx="1.1" />
-              <rect x="8.25" y="10" width="3.25" height="11" rx="1.1" />
-              <rect x="13.5" y="7" width="3.25" height="14" rx="1.1" />
-              <rect x="18.75" y="4" width="2.25" height="17" rx="1.1" />
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.7}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 20.25v-5.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 20.25v-8.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 20.25v-11.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 20.25v-14.5" />
             </svg>
           </Link>
         )}
