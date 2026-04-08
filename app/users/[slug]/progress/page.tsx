@@ -238,60 +238,6 @@ async function getCachedProgressShowDetails(
       let isSeasonFinale = false;
       let isSeriesFinale = false;
 
-      if (isComplete) {
-        const nextAirDate = calculatedNextEp?.releasedAt
-          ? new Date(calculatedNextEp.releasedAt)
-          : null;
-        const hasScheduledFutureEpisode =
-          nextAirDate && !Number.isNaN(nextAirDate.getTime()) && nextAirDate > currentTime;
-
-        if (!hasScheduledFutureEpisode) {
-          calculatedNextEp = null;
-          isSeasonFinale = false;
-          isSeriesFinale = false;
-        }
-      }
-
-      let epImageUrl = null;
-      if (calculatedNextEp) {
-        const tmdbEp = await fetchTmdbImages(
-          tmdbId,
-          "tv",
-          calculatedNextEp.season,
-          calculatedNextEp.number,
-        );
-        const traktEp = calculatedNextEp.rawEpisode
-          ? extractTraktImage(calculatedNextEp.rawEpisode, ["screenshot", "thumb"])
-          : null;
-        const traktProgressEp = progress?.next_episode
-          ? extractTraktImage(progress.next_episode, ["screenshot", "thumb"])
-          : null;
-        epImageUrl =
-          tmdbEp.still ||
-          traktEp ||
-          traktProgressEp ||
-          tmdbShowImgs.backdrop ||
-          extractTraktImage(summary, ["fanart"]);
-      }
-
-      let finalGlobalRating: number | undefined = undefined;
-
-      if (calculatedNextEp) {
-        const airDate = calculatedNextEp.releasedAt ? new Date(calculatedNextEp.releasedAt) : null;
-        const isAired = airDate && airDate <= currentTime;
-
-        if (isAired) {
-          finalGlobalRating = calculatedNextEp.rating || 0;
-        }
-      } else {
-        const isCompleted = totalAired > 0 && completed >= totalAired;
-        const isValidStatus = ["ended", "returning series", "canceled"].includes(showStatus);
-
-        if (isCompleted && isValidStatus) {
-          finalGlobalRating = summary?.rating || 0;
-        }
-      }
-
       const seasons: CachedProgressSeasonItem[] = allSeasons
         .filter((season: any) => season.number > 0)
         .sort((a: any, b: any) => a.number - b.number)
@@ -360,6 +306,60 @@ async function getCachedProgressShowDetails(
           ? aggregatedTotals.runtimeLeft
           : Math.max(0, totalAired - completed) * runtime;
       const isComplete = totalAired > 0 && completed >= totalAired;
+
+      if (isComplete) {
+        const nextAirDate = calculatedNextEp?.releasedAt
+          ? new Date(calculatedNextEp.releasedAt)
+          : null;
+        const hasScheduledFutureEpisode =
+          nextAirDate && !Number.isNaN(nextAirDate.getTime()) && nextAirDate > currentTime;
+
+        if (!hasScheduledFutureEpisode) {
+          calculatedNextEp = null;
+          isSeasonFinale = false;
+          isSeriesFinale = false;
+        }
+      }
+
+      let epImageUrl = null;
+      if (calculatedNextEp) {
+        const tmdbEp = await fetchTmdbImages(
+          tmdbId,
+          "tv",
+          calculatedNextEp.season,
+          calculatedNextEp.number,
+        );
+        const traktEp = calculatedNextEp.rawEpisode
+          ? extractTraktImage(calculatedNextEp.rawEpisode, ["screenshot", "thumb"])
+          : null;
+        const traktProgressEp = progress?.next_episode
+          ? extractTraktImage(progress.next_episode, ["screenshot", "thumb"])
+          : null;
+        epImageUrl =
+          tmdbEp.still ||
+          traktEp ||
+          traktProgressEp ||
+          tmdbShowImgs.backdrop ||
+          extractTraktImage(summary, ["fanart"]);
+      }
+
+      let finalGlobalRating: number | undefined = undefined;
+
+      if (calculatedNextEp) {
+        const airDate = calculatedNextEp.releasedAt ? new Date(calculatedNextEp.releasedAt) : null;
+        const isAired = airDate && airDate <= currentTime;
+
+        if (isAired) {
+          finalGlobalRating = calculatedNextEp.rating || 0;
+        }
+      } else {
+        const isCompleted = totalAired > 0 && completed >= totalAired;
+        const isValidStatus = ["ended", "returning series", "canceled"].includes(showStatus);
+
+        if (isCompleted && isValidStatus) {
+          finalGlobalRating = summary?.rating || 0;
+        }
+      }
 
       return {
         title: historyItem.show.title,
