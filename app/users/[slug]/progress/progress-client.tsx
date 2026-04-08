@@ -105,6 +105,48 @@ interface ProgressClientProps {
 type ActiveMenu = "checkin" | "rating" | "watchlist" | null;
 
 const DROP_CONFIRM_STORAGE_KEY = "pletra-progress-drop-confirm-disabled";
+const BACKGROUND_SEASON_PREFETCH_CONCURRENCY = 3;
+let backgroundSeasonPrefetchActiveCount = 0;
+let nextBackgroundSeasonPrefetchId = 0;
+const backgroundSeasonPrefetchQueue: Array<{
+  id: number;
+  run: () => Promise<void>;
+}> = [];
+
+const drainBackgroundSeasonPrefetchQueue = () => {
+  while (
+    backgroundSeasonPrefetchActiveCount < BACKGROUND_SEASON_PREFETCH_CONCURRENCY &&
+    backgroundSeasonPrefetchQueue.length > 0
+  ) {
+    const job = backgroundSeasonPrefetchQueue.shift();
+    if (!job) return;
+
+    backgroundSeasonPrefetchActiveCount += 1;
+
+    void job
+      .run()
+      .catch(() => {
+        // Background prefetch failures should not interrupt the page.
+      })
+      .finally(() => {
+        backgroundSeasonPrefetchActiveCount = Math.max(0, backgroundSeasonPrefetchActiveCount - 1);
+        drainBackgroundSeasonPrefetchQueue();
+      });
+  }
+};
+
+const enqueueBackgroundSeasonPrefetch = (run: () => Promise<void>) => {
+  const id = nextBackgroundSeasonPrefetchId++;
+  backgroundSeasonPrefetchQueue.push({ id, run });
+  drainBackgroundSeasonPrefetchQueue();
+
+  return () => {
+    const queuedIndex = backgroundSeasonPrefetchQueue.findIndex((job) => job.id === id);
+    if (queuedIndex >= 0) {
+      backgroundSeasonPrefetchQueue.splice(queuedIndex, 1);
+    }
+  };
+};
 
 const formatDuration = (totalMinutes: number | undefined | null): string => {
   if (!totalMinutes || Number.isNaN(totalMinutes) || totalMinutes <= 0) return "0m";
@@ -1554,6 +1596,8 @@ const ProgressShowRow = memo(
       top: number;
       left: number;
     } | null>(null);
+    const seasonsLoadedRef = useRef(Boolean(initialItem.seasonsLoaded));
+    const isLoadingSeasonsRef = useRef(false);
     const triggerRef = useRef<HTMLDivElement>(null);
     const dropButtonRef = useRef<HTMLButtonElement>(null);
     const checkinButtonRef = useRef<HTMLButtonElement>(null);
@@ -1562,6 +1606,9 @@ const ProgressShowRow = memo(
 
     useEffect(() => {
       setItem(initialItem);
+      seasonsLoadedRef.current = Boolean(initialItem.seasonsLoaded);
+      isLoadingSeasonsRef.current = false;
+      setIsLoadingSeasons(false);
     }, [initialItem]);
 
     const next = item.nextEpisode;
@@ -1604,6 +1651,14 @@ const ProgressShowRow = memo(
     useEffect(() => {
       setDropConfirmDisabled(loadDropConfirmDisabled());
     }, []);
+
+    useEffect(() => {
+      seasonsLoadedRef.current = Boolean(item.seasonsLoaded);
+    }, [item.seasonsLoaded]);
+
+    useEffect(() => {
+      isLoadingSeasonsRef.current = isLoadingSeasons;
+    }, [isLoadingSeasons]);
 
     useEffect(() => {
       let isMounted = true;
@@ -1816,32 +1871,48 @@ const ProgressShowRow = memo(
       });
     }, []);
 
-    const loadSeasonBreakdown = useCallback(async () => {
-      if (item.seasonsLoaded || isLoadingSeasons) return true;
+    const loadSeasonBreakdown = useCallback(
+      async ({ silent = false }: { silent?: boolean } = {}) => {
+        if (seasonsLoadedRef.current || isLoadingSeasonsRef.current) return true;
 
-      setIsLoadingSeasons(true);
-      try {
-        const response = await fetchTraktRouteJson<{ seasons: ProgressSeasonItem[] }>(
-          `/api/trakt/progress-breakdown?slug=${encodeURIComponent(slug)}&show=${encodeURIComponent(item.slug)}`,
-          {
-            timeoutMs: 15000,
-            maxRetries: 1,
-          },
-        );
+        isLoadingSeasonsRef.current = true;
+        setIsLoadingSeasons(true);
+        try {
+          const response = await fetchTraktRouteJson<{ seasons: ProgressSeasonItem[] }>(
+            `/api/trakt/progress-breakdown?slug=${encodeURIComponent(slug)}&show=${encodeURIComponent(item.slug)}`,
+            {
+              timeoutMs: 15000,
+              maxRetries: 1,
+            },
+          );
 
-        setItem((current) => ({
-          ...current,
-          seasons: response?.seasons ?? [],
-          seasonsLoaded: true,
-        }));
-        return true;
-      } catch (error) {
-        showToast(getErrorMessage(error, "Failed to load seasons."), "error");
-        return false;
-      } finally {
-        setIsLoadingSeasons(false);
-      }
-    }, [isLoadingSeasons, item.seasonsLoaded, item.slug, showToast, slug]);
+          setItem((current) => ({
+            ...current,
+            seasons: response?.seasons ?? [],
+            seasonsLoaded: true,
+          }));
+          seasonsLoadedRef.current = true;
+          return true;
+        } catch (error) {
+          if (!silent) {
+            showToast(getErrorMessage(error, "Failed to load seasons."), "error");
+          }
+          return false;
+        } finally {
+          isLoadingSeasonsRef.current = false;
+          setIsLoadingSeasons(false);
+        }
+      },
+      [item.slug, showToast, slug],
+    );
+
+    useEffect(() => {
+      if (item.seasonsLoaded) return;
+
+      return enqueueBackgroundSeasonPrefetch(async () => {
+        await loadSeasonBreakdown({ silent: true });
+      });
+    }, [item.seasonsLoaded, loadSeasonBreakdown]);
 
     const handleAction = async (
       category: "history" | "watchlist" | "ratings",
@@ -2060,7 +2131,7 @@ const ProgressShowRow = memo(
                 <ProgressBar
                   aired={item.aired}
                   completed={item.completed}
-                  mode={barMode}
+                  mode={item.seasons.length > 0 ? barMode : "simple"}
                   segments={item.seasons.map((season) => ({
                     aired: season.aired,
                     completed: season.completed,
