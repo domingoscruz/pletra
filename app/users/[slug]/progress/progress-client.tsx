@@ -85,6 +85,7 @@ export interface ProgressShowItem {
     historyId?: number;
     watchedAt?: string | null;
   };
+  seasonsLoaded?: boolean;
   seasons: ProgressSeasonItem[];
   nextEpisode: NextEpisodeDetails | null;
 }
@@ -102,6 +103,8 @@ interface ProgressClientProps {
 }
 
 type ActiveMenu = "checkin" | "rating" | "watchlist" | null;
+
+const DROP_CONFIRM_STORAGE_KEY = "pletra-progress-drop-confirm-disabled";
 
 const formatDuration = (totalMinutes: number | undefined | null): string => {
   if (!totalMinutes || Number.isNaN(totalMinutes) || totalMinutes <= 0) return "0m";
@@ -577,7 +580,7 @@ function SeasonProgressRow({
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-start gap-3 text-left transition-colors hover:text-white"
+          className="flex min-w-0 flex-1 flex-col gap-1.5 text-left transition-colors hover:text-white sm:flex-row sm:items-start sm:gap-3"
         >
           <span className="shrink-0">
             <span className="inline-flex items-center gap-1.5 text-[13px] font-bold text-white md:text-[14px]">
@@ -607,10 +610,10 @@ function SeasonProgressRow({
               </Link>
             </span>
           </span>
-          <span className="min-w-0 flex-1 pt-0.5 text-right text-[11px] text-white/60">
+          <span className="min-w-0 flex-1 pt-0.5 text-[11px] text-white/60 sm:text-right">
             {formatSeasonSummary(season)}
           </span>
-          <span className="w-14 shrink-0 text-right text-[16px] font-black leading-none text-white md:text-[17px]">
+          <span className="shrink-0 text-left text-[16px] font-black leading-none text-white sm:w-14 sm:text-right md:text-[17px]">
             {percentage}%
           </span>
         </button>
@@ -664,6 +667,26 @@ function Toast({ message, type = "success" }: { message: string; type?: "success
     </div>,
     document.body,
   );
+}
+
+function loadDropConfirmDisabled() {
+  if (typeof window === "undefined") return false;
+
+  try {
+    return localStorage.getItem(DROP_CONFIRM_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveDropConfirmDisabled(disabled: boolean) {
+  if (typeof window === "undefined") return;
+
+  try {
+    localStorage.setItem(DROP_CONFIRM_STORAGE_KEY, String(disabled));
+  } catch {
+    // Ignore unavailable storage
+  }
 }
 
 interface HistoryMenuProps {
@@ -1501,10 +1524,12 @@ const MenuWrapper = ({
 
 const ProgressShowRow = memo(
   ({
+    slug,
     item: initialItem,
     index,
     barMode,
   }: {
+    slug: string;
     item: ProgressShowItem;
     index: number;
     barMode: ProgressBarMode;
@@ -1518,11 +1543,17 @@ const ProgressShowRow = memo(
     const [userRating, setUserRating] = useState<number | undefined>(item.userRating);
     const [inWatchlist, setInWatchlist] = useState(false);
     const [showSeasonBreakdown, setShowSeasonBreakdown] = useState(false);
+    const [isLoadingSeasons, setIsLoadingSeasons] = useState(false);
     const [expandedSeasons, setExpandedSeasons] = useState<number[]>([]);
     const [hoveredAction, setHoveredAction] = useState<
       "drop" | "checkin" | "watchlist" | "rating" | null
     >(null);
-    const [isDropped, setIsDropped] = useState(false);
+    const [dropConfirmOpen, setDropConfirmOpen] = useState(false);
+    const [dropConfirmDisabled, setDropConfirmDisabled] = useState(false);
+    const [dropConfirmPosition, setDropConfirmPosition] = useState<{
+      top: number;
+      left: number;
+    } | null>(null);
     const triggerRef = useRef<HTMLDivElement>(null);
     const dropButtonRef = useRef<HTMLButtonElement>(null);
     const checkinButtonRef = useRef<HTMLButtonElement>(null);
@@ -1571,6 +1602,10 @@ const ProgressShowRow = memo(
     }, [effectiveUserRating]);
 
     useEffect(() => {
+      setDropConfirmDisabled(loadDropConfirmDisabled());
+    }, []);
+
+    useEffect(() => {
       let isMounted = true;
       fetchWatchlistIds().then((ids) => {
         if (isMounted) setInWatchlist(ids.includes(item.traktId));
@@ -1594,6 +1629,40 @@ const ProgressShowRow = memo(
       }
     }, [activeMenu]);
 
+    useEffect(() => {
+      if (!dropConfirmOpen) return;
+
+      const updateDropConfirmPosition = () => {
+        if (!dropButtonRef.current) return;
+
+        const rect = dropButtonRef.current.getBoundingClientRect();
+        setDropConfirmPosition({
+          top: rect.bottom + 8,
+          left: rect.left + rect.width / 2,
+        });
+      };
+
+      const handleClickOutside = (event: MouseEvent) => {
+        const target = event.target as HTMLElement;
+        if (dropButtonRef.current?.contains(target) || target.closest(".portal-drop-confirm")) {
+          return;
+        }
+
+        setDropConfirmOpen(false);
+      };
+
+      updateDropConfirmPosition();
+      window.addEventListener("resize", updateDropConfirmPosition);
+      window.addEventListener("scroll", updateDropConfirmPosition, true);
+      document.addEventListener("mousedown", handleClickOutside);
+
+      return () => {
+        window.removeEventListener("resize", updateDropConfirmPosition);
+        window.removeEventListener("scroll", updateDropConfirmPosition, true);
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }, [dropConfirmOpen]);
+
     const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
       setToast({ message, type });
       window.setTimeout(() => setToast(null), 2500);
@@ -1610,6 +1679,8 @@ const ProgressShowRow = memo(
         watchedAt: string;
       }) => {
         setItem((current) => {
+          if (current.seasons.length === 0) return current;
+
           const seasons = current.seasons.map((season) => ({
             ...season,
             episodes: season.episodes.map((episode) => ({ ...episode })),
@@ -1702,6 +1773,8 @@ const ProgressShowRow = memo(
 
     const applyLocalHistoryRemoval = useCallback(() => {
       setItem((current) => {
+        if (current.seasons.length === 0) return current;
+
         const target = current.lastEpisodeWatched;
         if (!target?.traktId) return current;
 
@@ -1742,6 +1815,33 @@ const ProgressShowRow = memo(
         return current;
       });
     }, []);
+
+    const loadSeasonBreakdown = useCallback(async () => {
+      if (item.seasonsLoaded || isLoadingSeasons) return true;
+
+      setIsLoadingSeasons(true);
+      try {
+        const response = await fetchTraktRouteJson<{ seasons: ProgressSeasonItem[] }>(
+          `/api/trakt/progress-breakdown?slug=${encodeURIComponent(slug)}&show=${encodeURIComponent(item.slug)}`,
+          {
+            timeoutMs: 15000,
+            maxRetries: 1,
+          },
+        );
+
+        setItem((current) => ({
+          ...current,
+          seasons: response?.seasons ?? [],
+          seasonsLoaded: true,
+        }));
+        return true;
+      } catch (error) {
+        showToast(getErrorMessage(error, "Failed to load seasons."), "error");
+        return false;
+      } finally {
+        setIsLoadingSeasons(false);
+      }
+    }, [isLoadingSeasons, item.seasonsLoaded, item.slug, showToast, slug]);
 
     const handleAction = async (
       category: "history" | "watchlist" | "ratings",
@@ -1791,10 +1891,7 @@ const ProgressShowRow = memo(
       setActiveMenu((current) => (current === menu ? null : menu));
     };
 
-    const handleDropShow = async (event: React.MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-
+    const runDropShow = async () => {
       try {
         await fetchTraktRouteJson("/api/trakt/hidden-progress", {
           method: item.isDropped ? "DELETE" : "POST",
@@ -1804,8 +1901,8 @@ const ProgressShowRow = memo(
           }),
           timeoutMs: 10000,
         });
-        setIsDropped(true);
-        showToast(item.isDropped ? "Show restored." : "Show dropped.");
+        setDropConfirmOpen(false);
+        showToast(item.isDropped ? `Restored ${item.title}.` : `Dropped ${item.title}.`, "success");
         router.refresh();
       } catch (error) {
         showToast(
@@ -1815,18 +1912,54 @@ const ProgressShowRow = memo(
       }
     };
 
-    const toggleSeasonBreakdown = () => {
-      setShowSeasonBreakdown((current) => {
-        if (current) {
-          setExpandedSeasons([]);
-          return false;
-        }
+    const openDropConfirm = () => {
+      if (!dropButtonRef.current) return;
 
-        return true;
+      const rect = dropButtonRef.current.getBoundingClientRect();
+      setDropConfirmPosition({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
       });
+      setDropConfirmOpen(true);
     };
 
-    const toggleSeason = (seasonNumber: number) => {
+    const handleDropShow = async (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (item.isDropped || dropConfirmDisabled) {
+        await runDropShow();
+        return;
+      }
+
+      setActiveMenu(null);
+      openDropConfirm();
+    };
+
+    const confirmDropShow = async (disableFutureConfirm: boolean) => {
+      if (disableFutureConfirm) {
+        saveDropConfirmDisabled(true);
+        setDropConfirmDisabled(true);
+      }
+
+      await runDropShow();
+    };
+
+    const toggleSeasonBreakdown = async () => {
+      if (showSeasonBreakdown) {
+        setExpandedSeasons([]);
+        setShowSeasonBreakdown(false);
+        return;
+      }
+
+      const loaded = await loadSeasonBreakdown();
+      if (loaded) setShowSeasonBreakdown(true);
+    };
+
+    const toggleSeason = async (seasonNumber: number) => {
+      const loaded = await loadSeasonBreakdown();
+      if (!loaded) return;
+
       setShowSeasonBreakdown(true);
       setExpandedSeasons((current) =>
         current.includes(seasonNumber)
@@ -1835,7 +1968,10 @@ const ProgressShowRow = memo(
       );
     };
 
-    const toggleAllSeasons = () => {
+    const toggleAllSeasons = async () => {
+      const loaded = await loadSeasonBreakdown();
+      if (!loaded) return;
+
       if (!showSeasonBreakdown || !areAllSeasonsExpanded) {
         setShowSeasonBreakdown(true);
         setExpandedSeasons(seasonNumbers);
@@ -1850,14 +1986,12 @@ const ProgressShowRow = memo(
       ? `Watched ${item.completed} of ${item.aired} episodes for ${item.plays} plays (${formatDuration(item.runtimeWatched)}). Great job, every episode is watched!`
       : `Watched ${item.completed} of ${item.aired} episodes for ${item.plays} plays (${formatDuration(item.runtimeWatched)}). ${remainingEpisodes} episodes (${formatDuration(item.runtimeLeft)}) left to watch.`;
 
-    if (isDropped) return null;
-
     return (
       <div className="group relative overflow-hidden border border-white/5 bg-[#2f2d2c] shadow-[0_14px_48px_rgba(0,0,0,0.35)]">
         <div className="relative flex flex-col md:flex-row md:items-start">
           <Link
             href={`/shows/${item.slug}`}
-            className="relative h-[190px] w-[126px] shrink-0 self-start overflow-hidden border-r border-white/5 bg-zinc-900 md:h-[210px] md:w-[140px]"
+            className="relative hidden h-[190px] w-[126px] shrink-0 self-start overflow-hidden border-r border-white/5 bg-zinc-900 md:block md:h-[210px] md:w-[140px]"
           >
             {item.posterUrl ? (
               <ProxiedImage
@@ -1875,13 +2009,13 @@ const ProgressShowRow = memo(
             )}
           </Link>
 
-          <div className="flex min-w-0 flex-1 flex-col px-5 py-4">
-            <div className="mb-3 flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-1 flex-col px-3 py-3 md:px-5 md:py-4">
+            <div className="mb-3 flex items-start justify-between gap-3 md:gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <Link
                     href={`/shows/${item.slug}`}
-                    className="truncate text-[17px] font-bold leading-none text-white transition-colors hover:text-red-500 md:text-[20px]"
+                    className="truncate text-[16px] font-bold leading-tight text-white transition-colors hover:text-red-500 md:text-[20px] md:leading-none"
                   >
                     {item.title}
                   </Link>
@@ -1908,26 +2042,38 @@ const ProgressShowRow = memo(
                     </svg>
                   </button>
                 </div>
+                {next ? (
+                  <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400 md:hidden">
+                    Up next: {formatEpisodeCode(next.season, next.number)}
+                    {next.title ? ` ${next.title}` : ""}
+                  </p>
+                ) : statusBadge ? (
+                  <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400 md:hidden">
+                    {statusBadge}
+                  </p>
+                ) : null}
               </div>
             </div>
 
-            <div className="mb-4 flex items-center gap-3">
-              <ProgressBar
-                aired={item.aired}
-                completed={item.completed}
-                mode={barMode}
-                segments={item.seasons.map((season) => ({
-                  aired: season.aired,
-                  completed: season.completed,
-                  watchedCells: season.episodes.map((episode) => episode.watched),
-                  label: season.year
-                    ? `Season ${season.season}: ${season.year}`
-                    : `Season ${season.season}`,
-                }))}
-              />
-              <span className="shrink-0 text-[18px] font-black text-white md:text-[20px]">
-                {percentage}%
-              </span>
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="flex items-center justify-between gap-3 sm:flex-1">
+                <ProgressBar
+                  aired={item.aired}
+                  completed={item.completed}
+                  mode={barMode}
+                  segments={item.seasons.map((season) => ({
+                    aired: season.aired,
+                    completed: season.completed,
+                    watchedCells: season.episodes.map((episode) => episode.watched),
+                    label: season.year
+                      ? `Season ${season.season}: ${season.year}`
+                      : `Season ${season.season}`,
+                  }))}
+                />
+                <span className="shrink-0 text-[18px] font-black text-white md:text-[20px]">
+                  {percentage}%
+                </span>
+              </div>
             </div>
 
             <div className="space-y-1 text-[12px] leading-[1.35] text-white/95 md:text-[13px]">
@@ -1953,21 +2099,32 @@ const ProgressShowRow = memo(
             <div className="mt-4 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-white/90 md:text-[12px]">
               <button
                 type="button"
-                onClick={toggleSeasonBreakdown}
+                onClick={() => void toggleSeasonBreakdown()}
                 className="transition-colors hover:text-red-400"
               >
-                {showSeasonBreakdown ? "- hide seasons" : "+ view seasons"}
+                {isLoadingSeasons
+                  ? "loading seasons..."
+                  : showSeasonBreakdown
+                    ? "- hide seasons"
+                    : "+ view seasons"}
               </button>
               <button
                 type="button"
-                onClick={toggleAllSeasons}
-                className="transition-colors hover:text-red-400"
+                onClick={() => void toggleAllSeasons()}
+                disabled={isLoadingSeasons}
+                className="transition-colors hover:text-red-400 disabled:opacity-40"
               >
                 {areAllSeasonsExpanded ? "- hide all" : "+ view all"}
               </button>
             </div>
 
-            {showSeasonBreakdown && item.seasons.length > 0 && (
+            {showSeasonBreakdown && isLoadingSeasons && (
+              <div className="mt-3.5 border-t border-white/5 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                Loading season breakdown...
+              </div>
+            )}
+
+            {showSeasonBreakdown && !isLoadingSeasons && item.seasons.length > 0 && (
               <div className="mt-3.5 space-y-2.5 border-t border-white/5 pt-3">
                 {item.seasons.map((season) => (
                   <SeasonProgressRow
@@ -1975,7 +2132,7 @@ const ProgressShowRow = memo(
                     showSlug={item.slug}
                     season={season}
                     isExpanded={expandedSeasons.includes(season.season)}
-                    onToggle={() => toggleSeason(season.season)}
+                    onToggle={() => void toggleSeason(season.season)}
                     barMode={barMode}
                   />
                 ))}
@@ -1983,7 +2140,7 @@ const ProgressShowRow = memo(
             )}
           </div>
 
-          <div className="flex w-full shrink-0 flex-col border-l border-white/5 md:w-[302px]">
+          <div className="flex w-full shrink-0 flex-col border-t border-white/5 md:w-[302px] md:border-t-0 md:border-l">
             <Link
               href={
                 next
@@ -2286,6 +2443,43 @@ const ProgressShowRow = memo(
           </div>
         </MenuWrapper>
 
+        {dropConfirmOpen &&
+          dropConfirmPosition &&
+          createPortal(
+            <div
+              className="portal-drop-confirm fixed z-[11000] -translate-x-1/2"
+              style={{
+                top: `${dropConfirmPosition.top}px`,
+                left: `${dropConfirmPosition.left}px`,
+              }}
+            >
+              <div className="relative w-72 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/10">
+                <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+                  You will be dropping this show. To restore, select Dropped Shows on the Progress
+                  page.
+                </p>
+                <div className="mt-3 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void confirmDropShow(false)}
+                    className="w-full rounded-md bg-red-600/15 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-400 transition-colors hover:bg-red-600/25"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmDropShow(true)}
+                    className="w-full rounded-md bg-zinc-800 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white transition-colors hover:bg-zinc-700"
+                  >
+                    Confirm and Never Show This Message Again
+                  </button>
+                </div>
+                <div className="absolute left-1/2 top-full -translate-x-1/2 border-8 border-transparent border-t-zinc-900" />
+              </div>
+            </div>,
+            document.body,
+          )}
+
         {toast && <Toast message={toast.message} type={toast.type} />}
         {isPending && !toast && <Toast message="Syncing..." type="success" />}
         <ActionTooltip
@@ -2412,7 +2606,13 @@ export function ProgressClient({
           </div>
         ) : (
           items.map((item, index) => (
-            <ProgressShowRow key={item.traktId} item={item} index={index} barMode={activeBarMode} />
+            <ProgressShowRow
+              key={item.traktId}
+              slug={slug}
+              item={item}
+              index={index}
+              barMode={activeBarMode}
+            />
           ))
         )}
       </div>

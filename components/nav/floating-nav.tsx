@@ -167,6 +167,7 @@ export function FloatingNav() {
   const traktUrl = getTraktUrl(pathname);
   const userSlug = session?.user?.email?.replace(/@trakt\.tv$/, "") || null;
   const isProfile = userSlug && pathname === `/users/${userSlug}`;
+  const isProgress = userSlug && pathname.startsWith(`/users/${userSlug}/progress`);
 
   /**
    * Logic to determine if the navigation should shift to the left.
@@ -276,6 +277,31 @@ export function FloatingNav() {
             />
           </svg>
         </button>
+
+        {/* Progress */}
+        {userSlug && (
+          <Link
+            href={`/users/${userSlug}/progress`}
+            className={`flex h-9 items-center rounded-full px-3 text-sm transition-colors ${
+              isProgress ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white"
+            }`}
+            title="Progress"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4.5 19.5h15M7.5 16.5V12m4.5 4.5V8.25m4.5 8.25v-6"
+              />
+            </svg>
+          </Link>
+        )}
 
         {/* Profile */}
         {userSlug && (

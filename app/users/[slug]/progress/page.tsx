@@ -1,14 +1,9 @@
 import { redirect } from "next/navigation";
 import Image from "next/image";
-import {
-  getAuthenticatedTraktClient,
-  getTraktAccessToken,
-  isCurrentUser,
-} from "@/lib/trakt-server";
+import { getAuthenticatedTraktClient, isCurrentUser } from "@/lib/trakt-server";
 import { proxyImageUrl } from "@/lib/image-proxy";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { withLocalCache } from "@/lib/local-cache";
-import { requestWithPolicy } from "@/lib/api/http";
 import { ProgressClient } from "./progress-client";
 
 interface ProgressPageProps {
@@ -47,6 +42,7 @@ export type ProgressShowItem = {
     historyId?: number;
     watchedAt?: string | null;
   };
+  seasonsLoaded?: boolean;
   seasons: {
     season: number;
     year?: number;
@@ -79,14 +75,12 @@ export type ProgressShowItem = {
   } | null;
 };
 
-type ProgressEpisodeBreakdown = ProgressShowItem["seasons"][number]["episodes"][number];
-type ProgressSeasonBreakdown = ProgressShowItem["seasons"][number];
 type CachedProgressShowItem = Omit<ProgressShowItem, "userRating" | "showUserRating">;
 
 const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
-const PROGRESS_SHOW_DETAIL_TTL_MS = 60_000;
-const TRAKT_API_BASE = "https://api.trakt.tv";
+const PROGRESS_SHOW_DETAIL_TTL_MS = 30 * 60_000;
+const DETAIL_FILTERS = new Set(["returning", "ended", "completed", "not-completed"]);
 
 /**
  * Extracts image URLs from Trakt objects based on available types
@@ -150,33 +144,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function fetchShowHistoryEntries(showId: string) {
-  const accessToken = await getTraktAccessToken();
-  if (!accessToken) return [];
-
-  try {
-    const headers = {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "trakt-api-version": "2",
-      "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
-      "user-agent": "pletra/1.0",
-    };
-
-    const response = await requestWithPolicy(
-      `${TRAKT_API_BASE}/sync/history/shows/${showId}?limit=1000`,
-      { headers, cache: "no-store" },
-      { timeoutMs: 10000, maxRetries: 1 },
-    ).catch(() => null);
-
-    if (!response?.ok) return [];
-    const data = (await response.json().catch(() => [])) as any[];
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
 async function getCachedProgressShowDetails(
   userKey: string,
   currentTime: Date,
@@ -184,327 +151,66 @@ async function getCachedProgressShowDetails(
   historyItem: any,
 ): Promise<CachedProgressShowItem> {
   const showSlug = historyItem.show.ids.slug;
-  const showTraktId = historyItem.show.ids.trakt;
   const tmdbId = historyItem.show.ids.tmdb;
 
   return withLocalCache(
     `progress-show:${userKey}:${showSlug}`,
     PROGRESS_SHOW_DETAIL_TTL_MS,
     async () => {
-      const [progressRes, summaryRes, seasonsRes, tmdbShowImgs, historyEntries] = await Promise.all(
-        [
-          client.shows.progress
-            .watched({
-              params: { id: showSlug },
-              query: { hidden: "false", specials: "false", count_specials: "false" } as any,
-            })
-            .catch(() => null),
-          client.shows
-            .summary({
-              params: { id: showSlug },
-              query: { extended: "full,images" } as any,
-            })
-            .catch(() => null),
-          (client.shows as any)
-            .seasons({
-              params: { id: showSlug },
-              query: { extended: "episodes,full" } as any,
-            })
-            .catch(() => null),
-          fetchTmdbImages(tmdbId, "tv"),
-          fetchShowHistoryEntries(String(showTraktId ?? showSlug)),
-        ],
-      );
+      const [progressRes, summaryRes, tmdbShowImgs] = await Promise.all([
+        client.shows.progress
+          .watched({
+            params: { id: showSlug },
+            query: { hidden: "false", specials: "false", count_specials: "false" } as any,
+          })
+          .catch(() => null),
+        client.shows
+          .summary({
+            params: { id: showSlug },
+            query: { extended: "full,images" } as any,
+          })
+          .catch(() => null),
+        fetchTmdbImages(tmdbId, "tv"),
+      ]);
 
       const progress = progressRes?.status === 200 ? (progressRes.body as any) : null;
       const summary = summaryRes?.status === 200 ? (summaryRes.body as any) : null;
-      const allSeasons = seasonsRes?.status === 200 ? (seasonsRes.body as any[]) : [];
       const runtime = summary?.runtime ?? 0;
-      const progressSeasonMap = new Map<number, any>(
-        (progress?.seasons ?? []).map((season: any) => [season.number, season]),
-      );
-      const normalizedHistoryEntries = historyEntries
-        .filter(
-          (entry: any) =>
-            entry?.episode?.season > 0 &&
-            entry?.episode?.number > 0 &&
-            typeof entry.watched_at === "string",
-        )
-        .sort(
-          (a: any, b: any) =>
-            new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
-        );
-      const episodeHistoryMap = new Map<
-        string,
-        { plays: number; lastWatchedAt: string | null; playDates: string[] }
-      >();
-
-      normalizedHistoryEntries.forEach((entry: any) => {
-        const key = `${entry.episode.season}-${entry.episode.number}`;
-        const existing = episodeHistoryMap.get(key);
-        if (existing) {
-          existing.plays += 1;
-          existing.playDates.push(entry.watched_at);
-          if (
-            !existing.lastWatchedAt ||
-            new Date(entry.watched_at).getTime() > new Date(existing.lastWatchedAt).getTime()
-          ) {
-            existing.lastWatchedAt = entry.watched_at;
-          }
-          return;
-        }
-
-        episodeHistoryMap.set(key, {
-          plays: 1,
-          lastWatchedAt: entry.watched_at,
-          playDates: [entry.watched_at],
-        });
-      });
-
-      const seasonItems: ProgressSeasonBreakdown[] = allSeasons
-        .filter((season: any) => season.number > 0)
-        .sort((a: any, b: any) => a.number - b.number)
-        .map((season: any) => {
-          const seasonProgress = progressSeasonMap.get(season.number);
-          const progressEpisodeMap = new Map<number, any>(
-            (seasonProgress?.episodes ?? []).map((episode: any) => [episode.number, episode]),
-          );
-
-          const episodes: ProgressEpisodeBreakdown[] = (season.episodes ?? [])
-            .filter((episode: any) => episode.number > 0)
-            .filter((episode: any) => {
-              if (!episode.first_aired) return false;
-
-              const firstAired = new Date(episode.first_aired);
-              return Number.isNaN(firstAired.getTime()) || firstAired <= currentTime;
-            })
-            .sort((a: any, b: any) => a.number - b.number)
-            .map((episode: any) => {
-              const episodeProgress = progressEpisodeMap.get(episode.number);
-              const episodeHistory = episodeHistoryMap.get(`${season.number}-${episode.number}`);
-              const episodeRuntime = episode.runtime ?? runtime;
-              const plays =
-                episodeHistory?.plays ??
-                episodeProgress?.plays ??
-                (episodeProgress?.completed ? 1 : 0);
-
-              return {
-                season: season.number,
-                number: episode.number,
-                title: episode.title ?? "",
-                traktId: episode.ids?.trakt,
-                watched: plays > 0 || Boolean(episodeProgress?.completed),
-                plays,
-                lastWatchedAt:
-                  episodeHistory?.lastWatchedAt ?? episodeProgress?.last_watched_at ?? null,
-                runtime: episodeRuntime,
-                firstAired: episode.first_aired ?? null,
-              };
-            });
-
-          const completedEpisodes = episodes.filter(
-            (episode: ProgressEpisodeBreakdown) => episode.watched,
-          );
-          const remainingEpisodes = episodes.filter(
-            (episode: ProgressEpisodeBreakdown) => !episode.watched,
-          );
-
-          return {
-            season: season.number,
-            year: season.year,
-            aired: episodes.length,
-            completed: completedEpisodes.length,
-            plays: episodes.reduce(
-              (total: number, episode: ProgressEpisodeBreakdown) => total + episode.plays,
-              0,
-            ),
-            runtimeWatched: completedEpisodes.reduce(
-              (total: number, episode: ProgressEpisodeBreakdown) =>
-                total + episode.runtime * Math.max(episode.plays, 1),
-              0,
-            ),
-            runtimeLeft: remainingEpisodes.reduce(
-              (total: number, episode: ProgressEpisodeBreakdown) => total + episode.runtime,
-              0,
-            ),
-            episodes,
-          };
-        });
-
-      let calculatedNextEp: any = null;
-      let isSeasonFinale = false;
-      let isSeriesFinale = false;
-      let trueLastEpisode: any = null;
-
-      if (progress && allSeasons.length > 0) {
-        let latestWatchedAt = 0;
-
-        if (normalizedHistoryEntries.length > 0) {
-          const latestHistoryEntry = normalizedHistoryEntries[0];
-          trueLastEpisode = {
-            season: latestHistoryEntry.episode.season,
-            number: latestHistoryEntry.episode.number,
-            title: latestHistoryEntry.episode.title ?? "",
-            traktId: latestHistoryEntry.episode.ids?.trakt,
-            historyId: latestHistoryEntry.id,
-            watchedAt: latestHistoryEntry.watched_at,
-          };
-        } else if (progress.seasons) {
-          progress.seasons.forEach((s: any) => {
-            s.episodes.forEach((e: any) => {
-              if (e.completed && e.last_watched_at) {
-                const watchedTime = new Date(e.last_watched_at).getTime();
-                if (watchedTime > latestWatchedAt) {
-                  latestWatchedAt = watchedTime;
-                  trueLastEpisode = {
-                    season: s.number,
-                    number: e.number,
-                    title: "",
-                    traktId: e.ids?.trakt,
-                    historyId: undefined,
-                    watchedAt: e.last_watched_at,
-                  };
-                }
-              }
-            });
-          });
-        }
-
-        if (trueLastEpisode) {
-          const matchingSeason = allSeasons.find((s: any) => s.number === trueLastEpisode.season);
-          if (matchingSeason) {
-            const matchingEpisode = matchingSeason.episodes?.find(
-              (e: any) => e.number === trueLastEpisode.number,
-            );
-            if (matchingEpisode) {
-              trueLastEpisode.title = matchingEpisode.title;
-            }
-          }
-        }
-
-        const anchor = trueLastEpisode || progress.last_episode;
-
-        if (anchor) {
-          const sortedSeasons = allSeasons
-            .filter((s: any) => s.number > 0)
-            .sort((a: any, b: any) => a.number - b.number);
-
-          let foundAnchor = false;
-          for (let i = 0; i < sortedSeasons.length; i++) {
-            const s = sortedSeasons[i];
-            if (s.number < anchor.season) continue;
-            const seasonProgress = progressSeasonMap.get(s.number);
-            const progressEpisodeMap = new Map<number, any>(
-              (seasonProgress?.episodes ?? []).map((episode: any) => [episode.number, episode]),
-            );
-
-            const episodes = (s.episodes || [])
-              .filter((episode: any) => {
-                if (!episode.first_aired) return false;
-                const firstAired = new Date(episode.first_aired);
-                return Number.isNaN(firstAired.getTime()) || firstAired >= new Date(0);
-              })
-              .sort((a: any, b: any) => a.number - b.number);
-
-            for (let j = 0; j < episodes.length; j++) {
-              const e = episodes[j];
-
-              if (!foundAnchor) {
-                if (s.number === anchor.season && e.number === anchor.number) {
-                  foundAnchor = true;
-                }
-                continue;
-              }
-
-              const episodeProgress = progressEpisodeMap.get(e.number);
-              if (episodeProgress?.completed) {
-                continue;
-              }
-
-              calculatedNextEp = {
-                season: s.number,
-                number: e.number,
-                title: e.title,
-                traktId: e.ids?.trakt,
-                releasedAt: e.first_aired,
-                rating: e.rating,
-                rawEpisode: e,
-              };
-
-              if (j === episodes.length - 1) {
-                isSeasonFinale = true;
-                if (i === sortedSeasons.length - 1) isSeriesFinale = true;
-              }
-              break;
-            }
-            if (calculatedNextEp) break;
-          }
-        }
-
-        if (!calculatedNextEp && !anchor && progress.next_episode) {
-          calculatedNextEp = {
-            season: progress.next_episode.season,
-            number: progress.next_episode.number,
-            title: progress.next_episode.title,
-            traktId: progress.next_episode.ids.trakt,
-            releasedAt: progress.next_episode.first_aired,
-            rating: progress.next_episode.rating,
-          };
-        }
-
-        if (!calculatedNextEp && progress.next_episode?.first_aired) {
-          calculatedNextEp = {
-            season: progress.next_episode.season,
-            number: progress.next_episode.number,
-            title: progress.next_episode.title,
-            traktId: progress.next_episode.ids.trakt,
-            releasedAt: progress.next_episode.first_aired,
-            rating: progress.next_episode.rating,
-          };
-        }
-      }
-
-      const aggregatedAired = seasonItems.reduce((total, season) => total + season.aired, 0);
-      const aggregatedCompleted = seasonItems.reduce(
-        (total, season) => total + season.completed,
-        0,
-      );
-      const aggregatedPlays = seasonItems.reduce((total, season) => total + season.plays, 0);
-      const aggregatedRuntimeWatched = seasonItems.reduce(
-        (total, season) => total + season.runtimeWatched,
-        0,
-      );
-      const aggregatedRuntimeLeft = seasonItems.reduce(
-        (total, season) => total + season.runtimeLeft,
-        0,
-      );
-      const totalAired = aggregatedAired || (progress?.aired ?? 0);
-      const completed = aggregatedCompleted || (progress?.completed ?? 0);
+      const traktPoster =
+        extractTraktImage(summary, ["poster"]) || extractTraktImage(historyItem.show, ["poster"]);
+      const traktBackdrop =
+        extractTraktImage(summary, ["fanart"]) || extractTraktImage(historyItem.show, ["fanart"]);
+      const totalAired = progress?.aired ?? 0;
+      const completed = progress?.completed ?? 0;
       const watchedShowPlays = historyItem.plays ?? 0;
-      const totalPlays = Math.max(aggregatedPlays, watchedShowPlays);
-      const totalRuntimeWatched = Math.max(aggregatedRuntimeWatched, totalPlays * runtime);
+      const totalPlays = Math.max(completed, watchedShowPlays);
+      const totalRuntimeWatched = Math.max(completed * runtime, totalPlays * runtime);
+      const totalRuntimeLeft = Math.max(0, totalAired - completed) * runtime;
       const showStatus = summary?.status?.toLowerCase() || "";
       const isComplete = totalAired > 0 && completed >= totalAired;
-
-      if (calculatedNextEp) {
-        const sortedSeasonItems = [...seasonItems].sort((a, b) => a.season - b.season);
-        const lastSeason = sortedSeasonItems[sortedSeasonItems.length - 1];
-        const lastEpisode = lastSeason?.episodes[lastSeason.episodes.length - 1];
-        const isAbsoluteLastEpisode =
-          lastSeason &&
-          lastEpisode &&
-          calculatedNextEp.season === lastSeason.season &&
-          calculatedNextEp.number === lastEpisode.number;
-
-        if (isAbsoluteLastEpisode) {
-          if (["ended", "canceled", "cancelled"].includes(showStatus)) {
-            isSeriesFinale = true;
-            isSeasonFinale = false;
-          } else if (!isSeriesFinale) {
-            isSeasonFinale = true;
+      const trueLastEpisode = progress?.last_episode
+        ? {
+            season: progress.last_episode.season,
+            number: progress.last_episode.number,
+            title: progress.last_episode.title ?? "",
+            traktId: progress.last_episode.ids?.trakt,
+            historyId: undefined,
+            watchedAt: historyItem.last_watched_at || null,
           }
-        }
-      }
+        : undefined;
+      let calculatedNextEp = progress?.next_episode
+        ? {
+            season: progress.next_episode.season,
+            number: progress.next_episode.number,
+            title: progress.next_episode.title,
+            traktId: progress.next_episode.ids?.trakt,
+            releasedAt: progress.next_episode.first_aired ?? null,
+            rating: progress.next_episode.rating,
+            rawEpisode: progress.next_episode,
+          }
+        : null;
+      let isSeasonFinale = false;
+      let isSeriesFinale = false;
 
       if (isComplete) {
         const nextAirDate = calculatedNextEp?.releasedAt
@@ -542,11 +248,6 @@ async function getCachedProgressShowDetails(
           extractTraktImage(summary, ["fanart"]);
       }
 
-      const traktPoster =
-        extractTraktImage(summary, ["poster"]) || extractTraktImage(historyItem.show, ["poster"]);
-      const traktBackdrop =
-        extractTraktImage(summary, ["fanart"]) || extractTraktImage(historyItem.show, ["fanart"]);
-
       let finalGlobalRating: number | undefined = undefined;
 
       if (calculatedNextEp) {
@@ -578,28 +279,11 @@ async function getCachedProgressShowDetails(
         completed,
         plays: totalPlays,
         runtimeWatched: totalRuntimeWatched || completed * runtime,
-        runtimeLeft: aggregatedRuntimeLeft || Math.max(0, totalAired - completed) * runtime,
+        runtimeLeft: totalRuntimeLeft,
         lastWatchedAt: historyItem.last_watched_at || null,
-        lastEpisodeWatched: trueLastEpisode
-          ? {
-              season: trueLastEpisode.season,
-              number: trueLastEpisode.number,
-              title: trueLastEpisode.title,
-              traktId: trueLastEpisode.traktId,
-              historyId: trueLastEpisode.historyId,
-              watchedAt: trueLastEpisode.watchedAt ?? null,
-            }
-          : progress?.last_episode
-            ? {
-                season: progress.last_episode.season,
-                number: progress.last_episode.number,
-                title: progress.last_episode.title,
-                traktId: progress.last_episode.ids?.trakt,
-                historyId: undefined,
-                watchedAt: historyItem.last_watched_at || null,
-              }
-            : undefined,
-        seasons: seasonItems,
+        lastEpisodeWatched: trueLastEpisode,
+        seasonsLoaded: false,
+        seasons: [],
         nextEpisode: calculatedNextEp
           ? {
               season: calculatedNextEp.season,
@@ -725,11 +409,16 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     );
   }
 
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const pageItems = filteredWatchedHistory.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const needsFullDetailedSet = activeSort === "progress" || DETAIL_FILTERS.has(activeFilter);
+  const historyItemsForDetails = needsFullDetailedSet
+    ? filteredWatchedHistory
+    : filteredWatchedHistory.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE,
+      );
 
   const detailedItems = await mapWithConcurrency(
-    pageItems,
+    historyItemsForDetails,
     DETAIL_REQUEST_CONCURRENCY,
     async (historyItem) => {
       const cachedItem = await getCachedProgressShowDetails(slug, currentTime, client, historyItem);
@@ -745,33 +434,45 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     },
   );
 
-  let items = detailedItems;
+  let processedItems = detailedItems;
 
   if (activeFilter === "returning") {
-    items = items.filter((item) => item.status?.toLowerCase() === "returning series");
+    processedItems = processedItems.filter(
+      (item) => item.status?.toLowerCase() === "returning series",
+    );
   } else if (activeFilter === "ended") {
-    items = items.filter((item) =>
+    processedItems = processedItems.filter((item) =>
       ["ended", "canceled", "cancelled"].includes(item.status?.toLowerCase() ?? ""),
     );
   } else if (activeFilter === "completed") {
-    items = items.filter((item) => item.completed >= item.aired && item.aired > 0);
+    processedItems = processedItems.filter(
+      (item) => item.completed >= item.aired && item.aired > 0,
+    );
   } else if (activeFilter === "not-completed") {
-    items = items.filter((item) => item.aired > 0 && item.completed < item.aired);
+    processedItems = processedItems.filter((item) => item.aired > 0 && item.completed < item.aired);
   } else if (activeFilter === "dropped") {
-    items = items.filter((item) => item.isDropped);
+    processedItems = processedItems.filter((item) => item.isDropped);
   }
 
   if (activeSort === "title") {
-    items.sort((a, b) => a.title.localeCompare(b.title));
+    processedItems.sort((a, b) => a.title.localeCompare(b.title));
   } else if (activeSort === "progress") {
-    items.sort((a, b) => b.completed / (b.aired || 1) - a.completed / (a.aired || 1));
+    processedItems.sort((a, b) => b.completed / (b.aired || 1) - a.completed / (a.aired || 1));
   } else {
-    items.sort((a, b) => {
+    processedItems.sort((a, b) => {
       const dateA = a.lastWatchedAt ? new Date(a.lastWatchedAt).getTime() : 0;
       const dateB = b.lastWatchedAt ? new Date(b.lastWatchedAt).getTime() : 0;
       return dateB - dateA;
     });
   }
+
+  const totalItems = needsFullDetailedSet ? processedItems.length : filteredWatchedHistory.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStartIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const items = needsFullDetailedSet
+    ? processedItems.slice(pageStartIndex, pageStartIndex + ITEMS_PER_PAGE)
+    : processedItems;
 
   const backdropImage = items.length > 0 ? items[0].backdropUrl || items[0].posterUrl : null;
 
@@ -799,9 +500,9 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
             activeFilter={activeFilter}
             activeSearch={activeSearch}
             activeBarMode={activeBarMode}
-            currentPage={currentPage}
-            totalPages={Math.ceil(filteredWatchedHistory.length / ITEMS_PER_PAGE)}
-            totalItems={filteredWatchedHistory.length}
+            currentPage={safeCurrentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
           />
         </div>
       </div>
