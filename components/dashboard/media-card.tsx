@@ -155,6 +155,7 @@ export function MediaCard({
   const [isTimeBadgeHovered, setIsTimeBadgeHovered] = useState(false);
   const [timeBadgePosition, setTimeBadgePosition] = useState({ top: 0, left: 0 });
   const [showTitleActionMenu, setShowTitleActionMenu] = useState(false);
+  const [titleActionMenuPos, setTitleActionMenuPos] = useState({ top: 0, left: 0 });
   const [titleActionLoading, setTitleActionLoading] = useState(false);
   const [isTitleActionHovered, setIsTitleActionHovered] = useState(false);
   const [titleActionTooltipPos, setTitleActionTooltipPos] = useState({ top: 0, left: 0 });
@@ -167,18 +168,35 @@ export function MediaCard({
   useEffect(() => {
     if (!showTitleActionMenu) return;
 
+    const updateTitleActionMenuPos = () => {
+      if (!titleActionRef.current) return;
+      const rect = titleActionRef.current.getBoundingClientRect();
+      setTitleActionMenuPos({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
+      });
+    };
+
+    updateTitleActionMenuPos();
+
     const handleClickOutside = (event: MouseEvent) => {
       if (
         titleActionRef.current &&
         !titleActionRef.current.contains(event.target as Node) &&
-        !(event.target as HTMLElement).closest("[data-title-action-menu='true']")
+        !(event.target as HTMLElement).closest(".portal-title-action-menu")
       ) {
         setShowTitleActionMenu(false);
       }
     };
 
+    window.addEventListener("resize", updateTitleActionMenuPos);
+    window.addEventListener("scroll", updateTitleActionMenuPos, true);
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      window.removeEventListener("resize", updateTitleActionMenuPos);
+      window.removeEventListener("scroll", updateTitleActionMenuPos, true);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [showTitleActionMenu]);
 
   /**
@@ -449,6 +467,13 @@ export function MediaCard({
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
+                      if (titleActionRef.current) {
+                        const rect = titleActionRef.current.getBoundingClientRect();
+                        setTitleActionMenuPos({
+                          top: rect.bottom + 8,
+                          left: rect.left + rect.width / 2,
+                        });
+                      }
                       setShowTitleActionMenu((current) => !current);
                     }}
                     onMouseEnter={() => {
@@ -475,24 +500,6 @@ export function MediaCard({
                       <circle cx="12" cy="12" r="9" />
                     </svg>
                   </button>
-                  {showTitleActionMenu && (
-                    <div
-                      data-title-action-menu="true"
-                      className="absolute left-1/2 top-full z-50 mt-2 w-44 -translate-x-1/2 rounded-xl bg-zinc-900 p-3 shadow-2xl ring-1 ring-white/10"
-                    >
-                      <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-zinc-500">
-                        This show will be added to your dropped shows.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleHideCalendarShow}
-                        disabled={titleActionLoading}
-                        className="w-full rounded-md bg-red-600/15 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-400 transition-colors hover:bg-red-600/25 disabled:opacity-50"
-                      >
-                        {titleActionLoading ? "Hiding..." : "Hide This Show"}
-                      </button>
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -558,6 +565,33 @@ export function MediaCard({
             <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
               Hide This Show
               <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {showTitleActionMenu &&
+        mounted &&
+        createPortal(
+          <div
+            className="portal-title-action-menu fixed z-[11000] -translate-x-1/2"
+            style={{
+              top: `${titleActionMenuPos.top}px`,
+              left: `${titleActionMenuPos.left}px`,
+            }}
+          >
+            <div className="w-44 rounded-xl bg-zinc-900 p-3 shadow-2xl ring-1 ring-white/10">
+              <p className="mb-2 text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+                This show will be added to your dropped shows.
+              </p>
+              <button
+                type="button"
+                onClick={handleHideCalendarShow}
+                disabled={titleActionLoading}
+                className="w-full rounded-md bg-red-600/15 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-400 transition-colors hover:bg-red-600/25 disabled:opacity-50"
+              >
+                {titleActionLoading ? "Hiding..." : "Hide This Show"}
+              </button>
             </div>
           </div>,
           document.body,
