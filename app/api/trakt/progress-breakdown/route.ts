@@ -3,6 +3,7 @@ import { withLocalCache } from "@/lib/local-cache";
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 
 const BREAKDOWN_TTL_MS = 10 * 60_000;
+const BREAKDOWN_CACHE_VERSION = "v2";
 
 type ProgressEpisodeBreakdown = {
   season: number;
@@ -29,7 +30,7 @@ type ProgressSeasonBreakdown = {
 
 async function getCachedBreakdown(userSlug: string, showSlug: string) {
   return withLocalCache(
-    `progress-breakdown:${userSlug}:${showSlug}`,
+    `progress-breakdown:${BREAKDOWN_CACHE_VERSION}:${userSlug}:${showSlug}`,
     BREAKDOWN_TTL_MS,
     async () => {
       const client = await getAuthenticatedTraktClient();
@@ -42,7 +43,7 @@ async function getCachedBreakdown(userSlug: string, showSlug: string) {
         client.shows.progress
           .watched({
             params: { id: showSlug },
-            query: { hidden: "false", specials: "false", count_specials: "false" } as any,
+            query: { hidden: false, specials: false, count_specials: false },
           })
           .catch(() => null),
         client.shows

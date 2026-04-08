@@ -83,6 +83,7 @@ const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
 const PROGRESS_SHOW_DETAIL_TTL_MS = 30 * 60_000;
 const DETAIL_FILTERS = new Set(["returning", "ended", "completed", "not-completed"]);
+const PROGRESS_SHOW_CACHE_VERSION = "v2";
 
 /**
  * Extracts image URLs from Trakt objects based on available types
@@ -146,6 +147,25 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+function aggregateSeasonTotals(seasons: CachedProgressSeasonItem[]) {
+  return seasons.reduce(
+    (totals, season) => ({
+      aired: totals.aired + season.aired,
+      completed: totals.completed + season.completed,
+      plays: totals.plays + season.plays,
+      runtimeWatched: totals.runtimeWatched + season.runtimeWatched,
+      runtimeLeft: totals.runtimeLeft + season.runtimeLeft,
+    }),
+    {
+      aired: 0,
+      completed: 0,
+      plays: 0,
+      runtimeWatched: 0,
+      runtimeLeft: 0,
+    },
+  );
+}
+
 async function getCachedProgressShowDetails(
   userKey: string,
   currentTime: Date,
@@ -156,14 +176,14 @@ async function getCachedProgressShowDetails(
   const tmdbId = historyItem.show.ids.tmdb;
 
   return withLocalCache(
-    `progress-show:${userKey}:${showSlug}`,
+    `progress-show:${PROGRESS_SHOW_CACHE_VERSION}:${userKey}:${showSlug}`,
     PROGRESS_SHOW_DETAIL_TTL_MS,
     async () => {
       const [progressRes, summaryRes, seasonsRes, tmdbShowImgs] = await Promise.all([
         client.shows.progress
           .watched({
             params: { id: showSlug },
-            query: { hidden: "false", specials: "false", count_specials: "false" } as any,
+            query: { hidden: false, specials: false, count_specials: false },
           })
           .catch(() => null),
         client.shows
@@ -189,14 +209,8 @@ async function getCachedProgressShowDetails(
         extractTraktImage(summary, ["poster"]) || extractTraktImage(historyItem.show, ["poster"]);
       const traktBackdrop =
         extractTraktImage(summary, ["fanart"]) || extractTraktImage(historyItem.show, ["fanart"]);
-      const totalAired = progress?.aired ?? 0;
-      const completed = progress?.completed ?? 0;
       const watchedShowPlays = historyItem.plays ?? 0;
-      const totalPlays = Math.max(completed, watchedShowPlays);
-      const totalRuntimeWatched = Math.max(completed * runtime, totalPlays * runtime);
-      const totalRuntimeLeft = Math.max(0, totalAired - completed) * runtime;
       const showStatus = summary?.status?.toLowerCase() || "";
-      const isComplete = totalAired > 0 && completed >= totalAired;
       const progressSeasonMap = new Map<number, any>(
         (progress?.seasons ?? []).map((season: any) => [season.number, season]),
       );
@@ -331,6 +345,21 @@ async function getCachedProgressShowDetails(
             episodes,
           };
         });
+
+      const aggregatedTotals = aggregateSeasonTotals(seasons);
+      const totalAired = aggregatedTotals.aired || progress?.aired || 0;
+      const completed = aggregatedTotals.completed || progress?.completed || 0;
+      const totalPlays = Math.max(aggregatedTotals.plays, completed, watchedShowPlays);
+      const totalRuntimeWatched = Math.max(
+        aggregatedTotals.runtimeWatched,
+        completed * runtime,
+        totalPlays * runtime,
+      );
+      const totalRuntimeLeft =
+        aggregatedTotals.aired > 0
+          ? aggregatedTotals.runtimeLeft
+          : Math.max(0, totalAired - completed) * runtime;
+      const isComplete = totalAired > 0 && completed >= totalAired;
 
       return {
         title: historyItem.show.title,
