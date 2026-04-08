@@ -30,6 +30,7 @@ export interface NextEpisodeDetails {
   number: number;
   title?: string;
   traktId?: number;
+  rating?: number;
   imageUrl: string | null;
   releasedAt: string | null;
   isSeasonFinale?: boolean;
