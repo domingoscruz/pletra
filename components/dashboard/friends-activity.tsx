@@ -1,4 +1,5 @@
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
+import { createTraktClient } from "@/lib/trakt";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { unstable_cache } from "next/cache";
 import { measureAsync } from "@/lib/perf";
@@ -50,40 +51,34 @@ export type FriendsActivitySectionPayload =
   | { status: "empty" }
   | { status: "error"; message: string };
 
-const getCachedFriendHistory = (username: string) =>
-  unstable_cache(
-    async () => {
-      const client = await getAuthenticatedTraktClient();
-      if (!client) return [];
+async function getFriendHistory(
+  client: Awaited<ReturnType<typeof getAuthenticatedTraktClient>>,
+  username: string,
+) {
+  try {
+    const res = await measureAsync(
+      "dashboard:friends-activity:friend-history",
+      () =>
+        client.users.history.all({
+          params: { id: username },
+          query: { page: 1, limit: 10, extended: "full" },
+        }),
+      { username },
+    );
 
-      try {
-        const res = await measureAsync(
-          "dashboard:friends-activity:friend-history",
-          () =>
-            client.users.history.all({
-              params: { id: username },
-              query: { page: 1, limit: 10, extended: "full" },
-            }),
-          { username },
-        );
-
-        return res.status === 200 ? (res.body as HistoryItem[]) : [];
-      } catch (error) {
-        if (!isTraktExpectedError(error)) {
-          console.error(`[Pletra] API Error for ${username}:`, error);
-        }
-        return [];
-      }
-    },
-    [`friend-history-v3-${username}`],
-    { revalidate: 600, tags: [`history-${username}`] },
-  )();
+    return res.status === 200 ? (res.body as HistoryItem[]) : [];
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error(`[Pletra] API Error for ${username}:`, error);
+    }
+    return [];
+  }
+}
 
 const getCachedThinnedShowMetadata = (slug: string) =>
   unstable_cache(
     async () => {
-      const client = await getAuthenticatedTraktClient();
-      if (!client) return {};
+      const client = createTraktClient();
 
       try {
         const res = await client.shows.seasons({
@@ -164,12 +159,6 @@ async function fetchUserMetadata() {
   }
 }
 
-const getCachedUserMetadata = (userSlug: string) =>
-  unstable_cache(async () => fetchUserMetadata(), [`user-metadata-v2-${userSlug}`], {
-    revalidate: 600,
-    tags: [`watched-${userSlug}`, `ratings-${userSlug}`],
-  })();
-
 export async function getFriendsActivitySectionPayload(): Promise<FriendsActivitySectionPayload> {
   try {
     const client = await getAuthenticatedTraktClient();
@@ -185,7 +174,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
       "dashboard:friends-activity:bootstrap",
       () =>
         Promise.all([
-          getCachedUserMetadata(userSlug),
+          fetchUserMetadata(),
           client.users
             .following({
               params: { id: "me" },
@@ -224,7 +213,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
         Promise.all(
           following.map(async (friend) => {
             const username = friend.user!.ids?.slug ?? friend.user!.username!;
-            const history = await getCachedFriendHistory(username);
+            const history = await getFriendHistory(client, username);
             return history.map((item) => ({ ...item, _user: friend.user! }));
           }),
         ),

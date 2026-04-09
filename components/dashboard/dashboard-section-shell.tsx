@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { CardGridSkeleton } from "./media-card-skeleton";
 import { ContinueWatchingGrid } from "./continue-watching-grid";
+import { FriendsActivityGrid } from "./friends-activity-grid";
 import { RecentActivityGrid } from "./recent-activity-grid";
 import { StartWatchingFilter } from "./start-watching-filter";
 import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
-import { FriendsActivityGrid } from "./friends-activity-grid";
 
 type DashboardSectionKey =
   | "continue-watching"
@@ -55,14 +55,14 @@ function SectionErrorState({
       <SectionHeader title={title} />
       <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5 text-center">
         <p className="text-sm font-medium text-zinc-200">{message}</p>
-        <p className="mt-1 text-xs text-zinc-500">Tente recarregar apenas esta seção.</p>
+        <p className="mt-1 text-xs text-zinc-500">Try reloading just this section.</p>
         <button
           type="button"
           onClick={onRetry}
           disabled={retrying}
           className="mt-4 rounded-lg bg-zinc-100 px-4 py-2 text-xs font-bold uppercase tracking-wider text-zinc-900 transition hover:bg-white disabled:cursor-default disabled:opacity-60"
         >
-          {retrying ? "Recarregando..." : "Tentar novamente"}
+          {retrying ? "Reloading..." : "Try again"}
         </button>
       </div>
     </div>
