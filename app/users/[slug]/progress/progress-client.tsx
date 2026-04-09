@@ -276,7 +276,6 @@ const ProgressBar = ({
             const width = `${(segment.aired / aired) * 100}%`;
             const watchedCells = segment.watchedCells ?? [];
             const hasWatchedCells = watchedCells.length > 0;
-            const cellWidth = hasWatchedCells ? 100 / watchedCells.length : 0;
 
             return (
               <div
@@ -295,18 +294,14 @@ const ProgressBar = ({
                 onMouseLeave={() => setHoveredSegment(null)}
               >
                 {hasWatchedCells ? (
-                  watchedCells.map((filled, cellIndex) =>
-                    filled ? (
+                  <div className="flex h-full w-full">
+                    {watchedCells.map((filled, cellIndex) => (
                       <div
                         key={`${cellIndex}-${segment.label ?? "segment-cell"}`}
-                        className="absolute top-0 bottom-0 bg-[#c27ae8]"
-                        style={{
-                          left: `${cellWidth * cellIndex}%`,
-                          width: `max(${cellWidth}%, 2px)`,
-                        }}
+                        className={cn("h-full min-w-0 flex-1", filled && "bg-[#c27ae8]")}
                       />
-                    ) : null,
-                  )
+                    ))}
+                  </div>
                 ) : (
                   <div
                     className="h-full bg-[#c27ae8] transition-all duration-500"
