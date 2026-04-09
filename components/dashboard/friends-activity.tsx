@@ -1,7 +1,6 @@
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { createTraktClient } from "@/lib/trakt";
 import { fetchTmdbImages } from "@/lib/tmdb";
-import { unstable_cache } from "next/cache";
 import { measureAsync } from "@/lib/perf";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { FriendsActivityGrid, type FriendsActivityGridItem } from "./friends-activity-grid";
@@ -75,39 +74,34 @@ async function getFriendHistory(
   }
 }
 
-const getCachedThinnedShowMetadata = (slug: string) =>
-  unstable_cache(
-    async () => {
-      const client = createTraktClient();
+async function getThinnedShowMetadata(slug: string) {
+  const client = createTraktClient();
 
-      try {
-        const res = await client.shows.seasons({
-          params: { id: slug },
-          query: { extended: "episodes" } as any,
-        });
+  try {
+    const res = await client.shows.seasons({
+      params: { id: slug },
+      query: { extended: "episodes" } as any,
+    });
 
-        if (res.status !== 200 || !Array.isArray(res.body)) return {};
+    if (res.status !== 200 || !Array.isArray(res.body)) return {};
 
-        const thinnedMap: Record<number, ThinnedEpisodeMetadata> = {};
-        res.body.forEach((season: any) => {
-          season.episodes?.forEach((ep: any) => {
-            if (ep.ids?.trakt) {
-              thinnedMap[ep.ids.trakt] = {
-                firstAired: ep.first_aired || "",
-                rating: ep.rating || 0,
-              };
-            }
-          });
-        });
+    const thinnedMap: Record<number, ThinnedEpisodeMetadata> = {};
+    res.body.forEach((season: any) => {
+      season.episodes?.forEach((ep: any) => {
+        if (ep.ids?.trakt) {
+          thinnedMap[ep.ids.trakt] = {
+            firstAired: ep.first_aired || "",
+            rating: ep.rating || 0,
+          };
+        }
+      });
+    });
 
-        return thinnedMap;
-      } catch {
-        return {};
-      }
-    },
-    [`show-metadata-v2-thinned-${slug}`],
-    { revalidate: 3600, tags: [`show-metadata-${slug}`] },
-  )();
+    return thinnedMap;
+  } catch {
+    return {};
+  }
+}
 
 async function fetchUserMetadata() {
   const client = await getAuthenticatedTraktClient();
@@ -235,8 +229,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
 
     const seasonsMetadataResults = await measureAsync(
       "dashboard:friends-activity:show-metadata",
-      () =>
-        Promise.all(uniqueShowSlugs.map((slug) => getCachedThinnedShowMetadata(slug as string))),
+      () => Promise.all(uniqueShowSlugs.map((slug) => getThinnedShowMetadata(slug as string))),
       { showCount: uniqueShowSlugs.length },
     );
 
