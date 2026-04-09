@@ -44,6 +44,7 @@ type HistoryItem = {
 export default async function HistoryPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
+  const client = createTraktClient();
   const type = (sp.type as "all" | "movies" | "shows") || "all";
   const page = parseInt(sp.page ?? "1", 10);
   const sortBy = sp.sort ?? "newest";
@@ -53,8 +54,6 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   let totalPages = 1;
   let totalItems = 0;
   try {
-    const client = createTraktClient();
-
     if (type === "movies") {
       const res = await client.users.history.movies({
         params: { id: slug },
