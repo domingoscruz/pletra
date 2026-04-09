@@ -12,6 +12,11 @@ export const revalidate = 0;
 
 const CONTINUE_WATCHING_CACHE_TTL_MS = 20_000;
 
+export type ContinueWatchingSectionPayload =
+  | { status: "ok"; items: any[] }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
 interface TraktIds {
   trakt: number;
   slug: string;
@@ -294,7 +299,7 @@ async function getCachedContinueWatchingItems(userKey: string) {
             if (!isTraktExpectedError(error)) {
               console.error("[Pletra] Continue Watching Error:", error);
             }
-            return [];
+            throw error;
           }
         },
       ),
@@ -304,20 +309,34 @@ async function getCachedContinueWatchingItems(userKey: string) {
 
 export async function ContinueWatching() {
   return measureAsync("dashboard:continue-watching:section", async () => {
-    try {
-      const userKey = (await getCurrentUser())?.slug ?? "me";
-      const items = await getCachedContinueWatchingItems(userKey);
+    const payload = await getContinueWatchingSectionPayload();
 
-      if (items.length === 0) {
-        return null;
-      }
-
-      return <ContinueWatchingGrid initialItems={items as any} />;
-    } catch (error) {
-      if (!isTraktExpectedError(error)) {
-        console.error("[Pletra] Continue Watching Section Error:", error);
-      }
+    if (payload.status !== "ok") {
       return null;
     }
+
+    return <ContinueWatchingGrid initialItems={payload.items as any} />;
   });
+}
+
+export async function getContinueWatchingSectionPayload(): Promise<ContinueWatchingSectionPayload> {
+  try {
+    const userKey = (await getCurrentUser())?.slug ?? "me";
+    const items = await getCachedContinueWatchingItems(userKey);
+
+    if (items.length === 0) {
+      return { status: "empty" };
+    }
+
+    return { status: "ok", items: items as any[] };
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Pletra] Continue Watching Payload Error:", error);
+    }
+
+    return {
+      status: "error",
+      message: "Error fetching data from Trakt.",
+    };
+  }
 }

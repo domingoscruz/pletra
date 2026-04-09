@@ -11,6 +11,11 @@ export const revalidate = 0;
 
 const RECENT_ACTIVITY_CACHE_TTL_MS = 20_000;
 
+export type RecentActivitySectionPayload =
+  | { status: "ok"; items: any[] }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
 function extractTraktImage(
   obj: any,
   types: ("screenshot" | "thumb" | "fanart" | "poster")[],
@@ -248,7 +253,7 @@ async function getCachedRecentActivityItems(userKey: string) {
             if (!isTraktExpectedError(error)) {
               console.error("[Pletra] Recent Activity Error:", error);
             }
-            return [];
+            throw error;
           }
         },
       ),
@@ -258,18 +263,34 @@ async function getCachedRecentActivityItems(userKey: string) {
 
 export async function RecentActivity() {
   return measureAsync("dashboard:recent-activity:section", async () => {
-    try {
-      const userKey = (await getCurrentUser())?.slug ?? "me";
-      const items = await getCachedRecentActivityItems(userKey);
+    const payload = await getRecentActivitySectionPayload();
 
-      if (items.length === 0) return null;
-
-      return <RecentActivityGrid initialItems={items as any} />;
-    } catch (error) {
-      if (!isTraktExpectedError(error)) {
-        console.error("[Pletra] Recent Activity Section Error:", error);
-      }
+    if (payload.status !== "ok") {
       return null;
     }
+
+    return <RecentActivityGrid initialItems={payload.items as any} />;
   });
+}
+
+export async function getRecentActivitySectionPayload(): Promise<RecentActivitySectionPayload> {
+  try {
+    const userKey = (await getCurrentUser())?.slug ?? "me";
+    const items = await getCachedRecentActivityItems(userKey);
+
+    if (items.length === 0) {
+      return { status: "empty" };
+    }
+
+    return { status: "ok", items: items as any[] };
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Pletra] Recent Activity Payload Error:", error);
+    }
+
+    return {
+      status: "error",
+      message: "Error fetching data from Trakt.",
+    };
+  }
 }

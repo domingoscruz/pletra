@@ -20,6 +20,11 @@ import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
 
 const UPCOMING_SCHEDULE_CACHE_TTL_MS = 60_000;
 
+export type UpcomingScheduleSectionPayload =
+  | { status: "ok"; items: any[] }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
 interface ScheduleItem {
   title: string;
   subtitle: string;
@@ -152,8 +157,7 @@ async function getCachedUpcomingScheduleItems(userKey: string) {
           ]);
 
           if (showsRes.status === 401 || moviesRes.status === 401) {
-            console.error("[UpcomingSchedule] Trakt API returned 401 Unauthorized.");
-            return { items: [], generatedAt: now.toISOString() };
+            throw new Error("TRAKT_UNAUTHORIZED: Trakt API returned 401 Unauthorized.");
           }
 
           const calShows = showsRes.status === 200 ? (showsRes.body as any[]) : [];
@@ -235,33 +239,48 @@ async function getCachedUpcomingScheduleItems(userKey: string) {
 
 export async function UpcomingSchedule() {
   return measureAsync("dashboard:upcoming-schedule:section", async () => {
-    try {
-      const userKey = (await getCurrentUser())?.slug ?? "me";
-      const { items, generatedAt, timeZone } = await getCachedUpcomingScheduleItems(userKey);
-      const hiddenShowIds = await fetchDroppedShowIds();
+    const payload = await getUpcomingScheduleSectionPayload();
 
-      const visibleItems = items.filter((item) =>
-        item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true,
-      );
-
-      if (visibleItems.length === 0) return null;
-
-      const generatedAtDate = new Date(generatedAt);
-
-      return (
-        <UpcomingScheduleGrid
-          items={visibleItems.map((item) => ({
-            ...item,
-            timeBadge: formatScheduleBadge(item.releasedAt, generatedAtDate, timeZone),
-            timeBadgeTooltip: formatScheduleTooltip(item.releasedAt, timeZone),
-          }))}
-        />
-      );
-    } catch (error: any) {
-      if (!isTraktExpectedError(error)) {
-        console.error("[Upcoming Schedule Server Error]:", error);
-      }
+    if (payload.status !== "ok") {
       return null;
     }
+
+    return <UpcomingScheduleGrid items={payload.items} />;
   });
+}
+
+export async function getUpcomingScheduleSectionPayload(): Promise<UpcomingScheduleSectionPayload> {
+  try {
+    const userKey = (await getCurrentUser())?.slug ?? "me";
+    const { items, generatedAt, timeZone } = await getCachedUpcomingScheduleItems(userKey);
+    const hiddenShowIds = await fetchDroppedShowIds();
+
+    const visibleItems = items.filter((item) =>
+      item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true,
+    );
+
+    if (visibleItems.length === 0) {
+      return { status: "empty" };
+    }
+
+    const generatedAtDate = new Date(generatedAt);
+
+    return {
+      status: "ok",
+      items: visibleItems.map((item) => ({
+        ...item,
+        timeBadge: formatScheduleBadge(item.releasedAt, generatedAtDate, timeZone),
+        timeBadgeTooltip: formatScheduleTooltip(item.releasedAt, timeZone),
+      })),
+    };
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Upcoming Schedule Payload Error]:", error);
+    }
+
+    return {
+      status: "error",
+      message: "Error fetching data from Trakt.",
+    };
+  }
 }

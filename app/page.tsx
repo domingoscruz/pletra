@@ -2,25 +2,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { Suspense } from "react";
-import { ContinueWatching } from "@/components/dashboard/continue-watching";
-import { StartWatching } from "@/components/dashboard/start-watching";
-import { RecentActivity } from "@/components/dashboard/recent-activity";
-import { UpcomingSchedule } from "@/components/dashboard/upcoming-schedule";
-import { FriendsActivity } from "@/components/dashboard/friends-activity";
 import { ProfileBackdrop } from "@/components/dashboard/profile-backdrop";
-import { CardGridSkeleton } from "@/components/dashboard/media-card-skeleton";
-
-/**
- * Skeleton component for section headers to maintain layout stability during loading
- */
-function SectionHeaderSkeleton() {
-  return (
-    <div className="mb-4 flex items-center gap-3">
-      <div className="h-4 w-24 md:w-32 animate-pulse rounded bg-zinc-800" />
-      <div className="h-px flex-1 bg-zinc-800/50" />
-    </div>
-  );
-}
+import { DashboardSectionShell } from "@/components/dashboard/dashboard-section-shell";
 
 /**
  * Skeleton component for the profile backdrop area
@@ -42,79 +25,54 @@ export default function DashboardPage() {
       */}
       <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-20 pt-4 md:space-y-12 md:pt-6 lg:px-8 bg-black/40 backdrop-blur-md rounded-2xl">
         <section className="w-full overflow-hidden">
-          <Suspense
-            fallback={
-              <div className="flex flex-col gap-4">
-                <SectionHeaderSkeleton />
-                <div className="min-h-[220px] md:min-h-[300px]">
-                  <CardGridSkeleton variant="poster" count={7} />
-                </div>
-              </div>
-            }
-          >
-            <ContinueWatching />
-          </Suspense>
+          <DashboardSectionShell
+            section="continue-watching"
+            title="Continue Watching"
+            variant="poster"
+            count={7}
+            minHeightClass="min-h-[220px] md:min-h-[300px]"
+          />
         </section>
 
         <section className="w-full">
-          <Suspense
-            fallback={
-              <div className="flex flex-col gap-4">
-                <SectionHeaderSkeleton />
-                <div className="min-h-[160px]">
-                  <CardGridSkeleton variant="landscape" count={5} />
-                </div>
-              </div>
-            }
-          >
-            <RecentActivity />
-          </Suspense>
+          <DashboardSectionShell
+            section="recent-activity"
+            title="Recently Watched"
+            variant="landscape"
+            count={5}
+            minHeightClass="min-h-[160px]"
+          />
         </section>
 
         <section className="w-full">
-          <Suspense
-            fallback={
-              <div className="flex flex-col gap-4">
-                <SectionHeaderSkeleton />
-                <div className="min-h-[220px] md:min-h-[300px]">
-                  <CardGridSkeleton variant="poster" count={7} />
-                </div>
-              </div>
-            }
-          >
-            <StartWatching />
-          </Suspense>
+          <DashboardSectionShell
+            section="start-watching"
+            title="Start Watching"
+            variant="poster"
+            count={7}
+            minHeightClass="min-h-[220px] md:min-h-[300px]"
+          />
         </section>
 
         <div className="grid grid-cols-1 gap-8 md:gap-12 lg:grid-cols-1">
           <section className="w-full">
-            <Suspense
-              fallback={
-                <div className="flex flex-col gap-4">
-                  <SectionHeaderSkeleton />
-                  <div className="min-h-[160px]">
-                    <CardGridSkeleton variant="landscape" count={5} />
-                  </div>
-                </div>
-              }
-            >
-              <UpcomingSchedule />
-            </Suspense>
+            <DashboardSectionShell
+              section="upcoming-schedule"
+              title="Upcoming Schedule"
+              variant="landscape"
+              count={5}
+              minHeightClass="min-h-[160px]"
+            />
           </section>
 
           <section className="w-full">
-            <Suspense
-              fallback={
-                <div className="flex flex-col gap-4">
-                  <SectionHeaderSkeleton />
-                  <div className="min-h-[160px]">
-                    <CardGridSkeleton variant="landscape" count={5} />
-                  </div>
-                </div>
-              }
-            >
-              <FriendsActivity />
-            </Suspense>
+            <DashboardSectionShell
+              section="friends-activity"
+              title="Friend Activity"
+              variant="landscape"
+              count={5}
+              minHeightClass="min-h-[160px]"
+            />
           </section>
         </div>
       </div>

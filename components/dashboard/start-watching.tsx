@@ -10,6 +10,11 @@ const START_WATCHING_CACHE_TTL_MS = 30_000;
 const START_WATCHING_EPISODE_META_TTL_MS = 300_000;
 const START_WATCHING_ROTATION_WINDOW_MS = 12 * 60 * 60 * 1000;
 
+export type StartWatchingSectionPayload =
+  | { status: "ok"; showItems: any[]; movieItems: any[] }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
 interface TraktIds {
   trakt: number;
   slug?: string;
@@ -258,7 +263,7 @@ async function getCachedStartWatchingData(userKey: string) {
             if (!isTraktExpectedError(error)) {
               console.error("[Pletra] Critical error in StartWatching component:", error);
             }
-            return { showItems: [] as MediaItem[], movieItems: [] as MediaItem[] };
+            throw error;
           }
         },
       ),
@@ -268,29 +273,44 @@ async function getCachedStartWatchingData(userKey: string) {
 
 export async function StartWatching() {
   return measureAsync("dashboard:start-watching:section", async () => {
-    try {
-      const userKey = (await getCurrentUser())?.slug ?? "me";
-      const { showItems, movieItems } = await getCachedStartWatchingData(userKey);
-      const rotationBucket = Math.floor(Date.now() / START_WATCHING_ROTATION_WINDOW_MS);
-      const shuffledShowItems = deterministicShuffle(
-        showItems,
-        `${userKey}:shows:${rotationBucket}`,
-      );
-      const shuffledMovieItems = deterministicShuffle(
-        movieItems,
-        `${userKey}:movies:${rotationBucket}`,
-      );
+    const payload = await getStartWatchingSectionPayload();
 
-      return (
-        <div className="w-full overflow-x-hidden px-1 sm:px-0">
-          <StartWatchingFilter showItems={shuffledShowItems} movieItems={shuffledMovieItems} />
-        </div>
-      );
-    } catch (error) {
-      if (!isTraktExpectedError(error)) {
-        console.error("[Pletra] Start Watching Section Error:", error);
-      }
+    if (payload.status !== "ok") {
       return null;
     }
+
+    return (
+      <div className="w-full overflow-x-hidden px-1 sm:px-0">
+        <StartWatchingFilter showItems={payload.showItems} movieItems={payload.movieItems} />
+      </div>
+    );
   });
+}
+
+export async function getStartWatchingSectionPayload(): Promise<StartWatchingSectionPayload> {
+  try {
+    const userKey = (await getCurrentUser())?.slug ?? "me";
+    const { showItems, movieItems } = await getCachedStartWatchingData(userKey);
+
+    if (showItems.length === 0 && movieItems.length === 0) {
+      return { status: "empty" };
+    }
+
+    const rotationBucket = Math.floor(Date.now() / START_WATCHING_ROTATION_WINDOW_MS);
+
+    return {
+      status: "ok",
+      showItems: deterministicShuffle(showItems, `${userKey}:shows:${rotationBucket}`),
+      movieItems: deterministicShuffle(movieItems, `${userKey}:movies:${rotationBucket}`),
+    };
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Pletra] Start Watching Payload Error:", error);
+    }
+
+    return {
+      status: "error",
+      message: "Error fetching data from Trakt.",
+    };
+  }
 }
