@@ -18,7 +18,8 @@ import { getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
 
-const UPCOMING_SCHEDULE_CACHE_TTL_MS = 60_000;
+const UPCOMING_SCHEDULE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const UPCOMING_SCHEDULE_HIDDEN_SHOWS_TTL_MS = 5 * 60 * 1000;
 
 export type UpcomingScheduleSectionPayload =
   | { status: "ok"; items: any[] }
@@ -83,11 +84,30 @@ const formatScheduleTooltip = (dateStr: string, timeZone?: string) =>
     timeZone,
   });
 
+function getScheduleSnapshotDateKey(date: Date, timeZone?: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return date.toISOString().split("T")[0];
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
 async function fetchDroppedShowIds() {
   return measureAsync("dashboard:upcoming-schedule:dropped-shows", () =>
     withLocalCache(
       "dashboard:upcoming-schedule:dropped-shows:me",
-      UPCOMING_SCHEDULE_CACHE_TTL_MS,
+      UPCOMING_SCHEDULE_HIDDEN_SHOWS_TTL_MS,
       async () => {
         const accessToken = await getTraktAccessToken();
         const clientId = process.env.TRAKT_CLIENT_ID;
@@ -132,18 +152,20 @@ async function fetchDroppedShowIds() {
 }
 
 async function getCachedUpcomingScheduleItems(userKey: string) {
+  const settings = await getUserSettings();
+  const timeZone = settings?.account?.timezone;
+  const snapshotDateKey = getScheduleSnapshotDateKey(new Date(), timeZone);
+
   return measureAsync(
     "dashboard:upcoming-schedule:data",
     () =>
       withLocalCache(
-        `dashboard:upcoming-schedule:${userKey}`,
-        UPCOMING_SCHEDULE_CACHE_TTL_MS,
+        `dashboard:upcoming-schedule:${userKey}:${snapshotDateKey}`,
+        UPCOMING_SCHEDULE_SNAPSHOT_TTL_MS,
         async () => {
           const now = new Date();
-          const todayStr = now.toISOString().split("T")[0];
+          const todayStr = snapshotDateKey;
           const client = await getAuthenticatedTraktClient();
-          const settings = await getUserSettings();
-          const timeZone = settings?.account?.timezone;
 
           const [showsRes, moviesRes] = await Promise.all([
             client.calendars.shows({
@@ -228,7 +250,6 @@ async function getCachedUpcomingScheduleItems(userKey: string) {
 
           return {
             items,
-            generatedAt: now.toISOString(),
             timeZone,
           };
         },
@@ -252,24 +273,25 @@ export async function UpcomingSchedule() {
 export async function getUpcomingScheduleSectionPayload(): Promise<UpcomingScheduleSectionPayload> {
   try {
     const userKey = (await getCurrentUser())?.slug ?? "me";
-    const { items, generatedAt, timeZone } = await getCachedUpcomingScheduleItems(userKey);
+    const { items, timeZone } = await getCachedUpcomingScheduleItems(userKey);
     const hiddenShowIds = await fetchDroppedShowIds();
+    const now = new Date();
 
-    const visibleItems = items.filter((item) =>
-      item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true,
+    const visibleItems = items.filter(
+      (item) =>
+        (item.showTraktId ? !hiddenShowIds.has(item.showTraktId) : true) &&
+        item.airTime >= now.getTime(),
     );
 
     if (visibleItems.length === 0) {
       return { status: "empty" };
     }
 
-    const generatedAtDate = new Date(generatedAt);
-
     return {
       status: "ok",
       items: visibleItems.map((item) => ({
         ...item,
-        timeBadge: formatScheduleBadge(item.releasedAt, generatedAtDate, timeZone),
+        timeBadge: formatScheduleBadge(item.releasedAt, now, timeZone),
         timeBadgeTooltip: formatScheduleTooltip(item.releasedAt, timeZone),
       })),
     };
