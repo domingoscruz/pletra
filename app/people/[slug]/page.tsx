@@ -4,6 +4,7 @@ import { ProxiedImage as Image } from "@/components/ui/proxied-image";
 import Link from "@/components/ui/link";
 import { requestWithPolicy } from "@/lib/api/http";
 import { createTraktClient } from "@/lib/trakt";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { getPersonData } from "@/lib/metadata";
@@ -168,120 +169,141 @@ type ShowCredit = {
 };
 
 async function MovieCredits({ slug }: { slug: string }) {
-  const client = createTraktClient();
-  const res = await client.people.movies({
-    params: { id: slug },
-    query: { extended: "full" },
-  });
-  if (res.status !== 200) return null;
+  try {
+    const client = createTraktClient();
+    const res = await client.people.movies({
+      params: { id: slug },
+      query: { extended: "full" },
+    });
+    if (res.status !== 200) return null;
 
-  const body = res.body as { cast?: MovieCredit[] };
-  const cast = body.cast ?? [];
-  if (cast.length === 0) return null;
+    const body = res.body as { cast?: MovieCredit[] };
+    const cast = body.cast ?? [];
+    if (cast.length === 0) return null;
 
-  // Sort by year desc, then rating
-  const sorted = [...cast].sort((a, b) => {
-    const ya = a.movie.year ?? 0;
-    const yb = b.movie.year ?? 0;
-    if (yb !== ya) return yb - ya;
-    return (b.movie.rating ?? 0) - (a.movie.rating ?? 0);
-  });
+    // Sort by year desc, then rating
+    const sorted = [...cast].sort((a, b) => {
+      const ya = a.movie.year ?? 0;
+      const yb = b.movie.year ?? 0;
+      if (yb !== ya) return yb - ya;
+      return (b.movie.rating ?? 0) - (a.movie.rating ?? 0);
+    });
 
-  const images = await Promise.all(
-    sorted.map((c) =>
-      c.movie.ids?.tmdb
-        ? fetchTmdbImages(c.movie.ids.tmdb, "movie")
-        : Promise.resolve({ poster: null, backdrop: null }),
-    ),
-  );
+    const images = await Promise.all(
+      sorted.map((c) =>
+        c.movie.ids?.tmdb
+          ? fetchTmdbImages(c.movie.ids.tmdb, "movie")
+          : Promise.resolve({ poster: null, backdrop: null }),
+      ),
+    );
 
-  return (
-    <CardGrid title="Movies" defaultRows={2} rowSize={6}>
-      {sorted.map((credit, i) => {
-        const parts: string[] = [];
-        if (credit.movie.year) parts.push(String(credit.movie.year));
-        if (credit.movie.runtime) parts.push(formatRuntime(credit.movie.runtime));
-        const character = credit.characters?.[0] ?? credit.character;
-        if (character) parts.push(character);
+    return (
+      <CardGrid title="Movies" defaultRows={2} rowSize={6}>
+        {sorted.map((credit, i) => {
+          const parts: string[] = [];
+          if (credit.movie.year) parts.push(String(credit.movie.year));
+          if (credit.movie.runtime) parts.push(formatRuntime(credit.movie.runtime));
+          const character = credit.characters?.[0] ?? credit.character;
+          if (character) parts.push(character);
 
-        return (
-          <MediaCard
-            key={credit.movie.ids?.trakt}
-            title={credit.movie.title ?? "Unknown"}
-            subtitle={parts.join(" · ") || undefined}
-            href={`/movies/${credit.movie.ids?.slug}`}
-            backdropUrl={images[i]?.backdrop ?? null}
-            posterUrl={images[i]?.poster ?? null}
-            rating={credit.movie.rating}
-            mediaType="movies"
-            ids={credit.movie.ids ?? {}}
-            variant="poster"
-          />
-        );
-      })}
-    </CardGrid>
-  );
+          return (
+            <MediaCard
+              key={credit.movie.ids?.trakt}
+              title={credit.movie.title ?? "Unknown"}
+              subtitle={parts.join(" · ") || undefined}
+              href={`/movies/${credit.movie.ids?.slug}`}
+              backdropUrl={images[i]?.backdrop ?? null}
+              posterUrl={images[i]?.poster ?? null}
+              rating={credit.movie.rating}
+              mediaType="movies"
+              ids={credit.movie.ids ?? {}}
+              variant="poster"
+            />
+          );
+        })}
+      </CardGrid>
+    );
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Person Page] Movie credits fetch failed:", error);
+    }
+    return null;
+  }
 }
 
 async function ShowCredits({ slug }: { slug: string }) {
-  const client = createTraktClient();
-  const res = await client.people.shows({
-    params: { id: slug },
-    query: { extended: "full" },
-  });
-  if (res.status !== 200) return null;
+  try {
+    const client = createTraktClient();
+    const res = await client.people.shows({
+      params: { id: slug },
+      query: { extended: "full" },
+    });
+    if (res.status !== 200) return null;
 
-  const body = res.body as { cast?: ShowCredit[] };
-  const cast = body.cast ?? [];
-  if (cast.length === 0) return null;
+    const body = res.body as { cast?: ShowCredit[] };
+    const cast = body.cast ?? [];
+    if (cast.length === 0) return null;
 
-  // Sort by episode count desc (most significant roles first)
-  const sorted = [...cast].sort((a, b) => b.episode_count - a.episode_count);
+    // Sort by episode count desc (most significant roles first)
+    const sorted = [...cast].sort((a, b) => b.episode_count - a.episode_count);
 
-  const images = await Promise.all(
-    sorted.map((c) =>
-      c.show.ids?.tmdb
-        ? fetchTmdbImages(c.show.ids.tmdb, "tv")
-        : Promise.resolve({ poster: null, backdrop: null }),
-    ),
-  );
+    const images = await Promise.all(
+      sorted.map((c) =>
+        c.show.ids?.tmdb
+          ? fetchTmdbImages(c.show.ids.tmdb, "tv")
+          : Promise.resolve({ poster: null, backdrop: null }),
+      ),
+    );
 
-  return (
-    <CardGrid title="Shows" defaultRows={2} rowSize={6}>
-      {sorted.map((credit, i) => {
-        const parts: string[] = [];
-        if (credit.show.year) parts.push(String(credit.show.year));
-        const character = credit.characters?.[0] ?? credit.character;
-        if (character) parts.push(character);
-        if (credit.episode_count > 0) parts.push(`${credit.episode_count} eps`);
+    return (
+      <CardGrid title="Shows" defaultRows={2} rowSize={6}>
+        {sorted.map((credit, i) => {
+          const parts: string[] = [];
+          if (credit.show.year) parts.push(String(credit.show.year));
+          const character = credit.characters?.[0] ?? credit.character;
+          if (character) parts.push(character);
+          if (credit.episode_count > 0) parts.push(`${credit.episode_count} eps`);
 
-        return (
-          <MediaCard
-            key={credit.show.ids?.trakt}
-            title={credit.show.title ?? "Unknown"}
-            subtitle={parts.join(" · ") || undefined}
-            href={`/shows/${credit.show.ids?.slug}`}
-            backdropUrl={images[i]?.backdrop ?? null}
-            posterUrl={images[i]?.poster ?? null}
-            rating={credit.show.rating}
-            mediaType="shows"
-            ids={credit.show.ids ?? {}}
-            variant="poster"
-          />
-        );
-      })}
-    </CardGrid>
-  );
+          return (
+            <MediaCard
+              key={credit.show.ids?.trakt}
+              title={credit.show.title ?? "Unknown"}
+              subtitle={parts.join(" · ") || undefined}
+              href={`/shows/${credit.show.ids?.slug}`}
+              backdropUrl={images[i]?.backdrop ?? null}
+              posterUrl={images[i]?.poster ?? null}
+              rating={credit.show.rating}
+              mediaType="shows"
+              ids={credit.show.ids ?? {}}
+              variant="poster"
+            />
+          );
+        })}
+      </CardGrid>
+    );
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Person Page] Show credits fetch failed:", error);
+    }
+    return null;
+  }
 }
 
 export default async function PersonPage({ params }: Props) {
   const { slug } = await params;
-  const client = createTraktClient();
+  let summaryRes: { status: number; body?: unknown } = { status: 500 };
 
-  const summaryRes = await client.people.summary({
-    params: { id: slug },
-    query: { extended: "full" },
-  });
+  try {
+    const client = createTraktClient();
+    summaryRes = await client.people.summary({
+      params: { id: slug },
+      query: { extended: "full" },
+    });
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Person Page] Summary fetch failed:", error);
+    }
+  }
 
   if (summaryRes.status !== 200) {
     return (

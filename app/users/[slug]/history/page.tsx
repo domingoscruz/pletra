@@ -1,4 +1,5 @@
 import { createTraktClient } from "@/lib/trakt";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { HistoryClient } from "./history-client";
 
@@ -48,69 +49,74 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   const sortBy = sp.sort ?? "newest";
   const searchQuery = sp.q ?? "";
   const limit = 42;
-  const client = createTraktClient();
-
   let items: HistoryItem[] = [];
   let totalPages = 1;
   let totalItems = 0;
+  try {
+    const client = createTraktClient();
 
-  if (type === "movies") {
-    const res = await client.users.history.movies({
-      params: { id: slug },
-      query: { page, limit, extended: "full" },
-    });
-    if (res.status === 200) {
-      items = res.body as HistoryItem[];
-      totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
-      totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
-    }
-  } else if (type === "shows") {
-    const res = await client.users.history.shows({
-      params: { id: slug },
-      query: { page, limit, extended: "full" },
-    });
-    if (res.status === 200) {
-      items = res.body as HistoryItem[];
-      totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
-      totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
-    }
-  } else {
-    const [movieRes, showRes] = await Promise.all([
-      client.users.history.movies({
+    if (type === "movies") {
+      const res = await client.users.history.movies({
         params: { id: slug },
-        query: { page, limit: Math.ceil(limit / 2), extended: "full" },
-      }),
-      client.users.history.shows({
+        query: { page, limit, extended: "full" },
+      });
+      if (res.status === 200) {
+        items = res.body as HistoryItem[];
+        totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
+        totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+      }
+    } else if (type === "shows") {
+      const res = await client.users.history.shows({
         params: { id: slug },
-        query: { page, limit: Math.ceil(limit / 2), extended: "full" },
-      }),
-    ]);
+        query: { page, limit, extended: "full" },
+      });
+      if (res.status === 200) {
+        items = res.body as HistoryItem[];
+        totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
+        totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+      }
+    } else {
+      const [movieRes, showRes] = await Promise.all([
+        client.users.history.movies({
+          params: { id: slug },
+          query: { page, limit: Math.ceil(limit / 2), extended: "full" },
+        }),
+        client.users.history.shows({
+          params: { id: slug },
+          query: { page, limit: Math.ceil(limit / 2), extended: "full" },
+        }),
+      ]);
 
-    const movies = movieRes.status === 200 ? (movieRes.body as HistoryItem[]) : [];
-    const shows = showRes.status === 200 ? (showRes.body as HistoryItem[]) : [];
+      const movies = movieRes.status === 200 ? (movieRes.body as HistoryItem[]) : [];
+      const shows = showRes.status === 200 ? (showRes.body as HistoryItem[]) : [];
 
-    items = [...movies, ...shows].sort(
-      (a, b) => new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
-    );
+      items = [...movies, ...shows].sort(
+        (a, b) => new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
+      );
 
-    const movieTotal = parseInt(
-      String(
-        (movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-          "x-pagination-page-count",
-        ) ?? "1",
-      ),
-      10,
-    );
-    const showTotal = parseInt(
-      String(
-        (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-          "x-pagination-page-count",
-        ) ?? "1",
-      ),
-      10,
-    );
-    totalPages = Math.max(movieTotal, showTotal);
-    totalItems = items.length;
+      const movieTotal = parseInt(
+        String(
+          (movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+            "x-pagination-page-count",
+          ) ?? "1",
+        ),
+        10,
+      );
+      const showTotal = parseInt(
+        String(
+          (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+            "x-pagination-page-count",
+          ) ?? "1",
+        ),
+        10,
+      );
+      totalPages = Math.max(movieTotal, showTotal);
+      totalItems = items.length;
+    }
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[User History Page] Failed to load history:", error);
+    }
   }
 
   // Build a map of user ratings
@@ -138,8 +144,10 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         if (id && r.rating) userRatingsMap.set(id, r.rating);
       }
     }
-  } catch {
-    // Not available
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[User History Page] Failed to load ratings map:", error);
+    }
   }
 
   // Server-side search
@@ -177,7 +185,10 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
-        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv")
+        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
+            poster: null,
+            backdrop: null,
+          }))
         : Promise.resolve({ poster: null, backdrop: null });
     }),
   );

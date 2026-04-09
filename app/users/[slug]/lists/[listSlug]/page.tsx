@@ -1,6 +1,7 @@
 import Link from "@/components/ui/link";
 import { requestWithPolicy } from "@/lib/api/http";
 import { createTraktClient } from "@/lib/trakt";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { getOptionalTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages, fetchTmdbPersonImage } from "@/lib/tmdb";
 import { ListDetailClient } from "./list-detail-client";
@@ -68,12 +69,19 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   const runtimes = sp.runtimes;
   const limit = 42; // 7 * 6
 
-  const client = createTraktClient();
-
   // Get list summary
-  const summaryRes = await client.users.lists.list.summary({
-    params: { id: slug, list_id: listSlug },
-  });
+  let summaryRes: { status: number; body?: unknown } = { status: 500 };
+
+  try {
+    const client = createTraktClient();
+    summaryRes = await client.users.lists.list.summary({
+      params: { id: slug, list_id: listSlug },
+    });
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[List Detail Page] Failed to load list summary:", error);
+    }
+  }
 
   const listInfo = summaryRes.status === 200 ? (summaryRes.body as unknown as ListSummary) : null;
 
@@ -97,25 +105,34 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   if (runtimes) queryParams.set("runtimes", runtimes);
 
   // Fetch list items directly from Trakt API to include person type
-  const itemsRes = await requestWithPolicy(
-    `https://api.trakt.tv/users/${encodeURIComponent(slug)}/lists/${encodeURIComponent(listSlug)}/items/movie,show,person?${queryParams.toString()}`,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "trakt-api-version": "2",
-        "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
-        "user-agent": "pletra/1.0",
-      },
-      next: { revalidate: 300 },
-    },
-    {
-      timeoutMs: 10000,
-      maxRetries: 2,
-    },
-  );
+  let items: ListedItem[] = [];
+  let totalPages = 1;
 
-  const items: ListedItem[] = itemsRes.ok ? await itemsRes.json() : [];
-  const totalPages = parseInt(itemsRes.headers.get("x-pagination-page-count") ?? "1", 10);
+  try {
+    const itemsRes = await requestWithPolicy(
+      `https://api.trakt.tv/users/${encodeURIComponent(slug)}/lists/${encodeURIComponent(listSlug)}/items/movie,show,person?${queryParams.toString()}`,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "trakt-api-version": "2",
+          "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+          "user-agent": "pletra/1.0",
+        },
+        next: { revalidate: 300 },
+      },
+      {
+        timeoutMs: 10000,
+        maxRetries: 2,
+      },
+    );
+
+    items = itemsRes.ok ? await itemsRes.json() : [];
+    totalPages = parseInt(itemsRes.headers.get("x-pagination-page-count") ?? "1", 10);
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[List Detail Page] Failed to load list items:", error);
+    }
+  }
 
   // Check if this is the current user's list
   let isOwner = false;
@@ -128,8 +145,10 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         isOwner = profile.ids?.slug === slug;
       }
     }
-  } catch {
-    // Not authenticated
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[List Detail Page] Failed to resolve list ownership:", error);
+    }
   }
 
   // Fetch images (person images from TMDB)
@@ -138,13 +157,16 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
       if (item.type === "person") {
         const tmdbId = item.person?.ids?.tmdb;
         if (!tmdbId) return { poster: null, backdrop: null };
-        const poster = await fetchTmdbPersonImage(tmdbId);
+        const poster = await fetchTmdbPersonImage(tmdbId).catch(() => null);
         return { poster, backdrop: null };
       }
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
-        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv")
+        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
+            poster: null,
+            backdrop: null,
+          }))
         : { poster: null, backdrop: null };
     }),
   );

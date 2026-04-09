@@ -1,5 +1,6 @@
 import Link from "@/components/ui/link";
 import { getAuthenticatedTraktClient, getUserSettings } from "@/lib/trakt-server";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { fetchTmdbImages, fetchTmdbEpisodeImages } from "@/lib/tmdb";
 import { CalendarView } from "./calendar-view";
 
@@ -86,134 +87,149 @@ export default async function CalendarPage({ searchParams }: Props) {
   }
 
   const startStr = startDate.toISOString().split("T")[0];
-  const client = await getAuthenticatedTraktClient();
-
-  const fetchShows = type !== "movies";
-  const fetchMovies = type !== "shows";
-
-  const [showsRes, moviesRes, settings] = await Promise.all([
-    fetchShows
-      ? client.calendars.shows({
-          params: { target: "my", start_date: startStr, days },
-          query: { extended: "full" },
-        })
-      : Promise.resolve({ status: 200 as const, body: [] }),
-    fetchMovies
-      ? client.calendars.movies({
-          params: { target: "my", start_date: startStr, days },
-          query: { extended: "full" },
-        })
-      : Promise.resolve({ status: 200 as const, body: [] }),
-    getUserSettings(),
-  ]);
-
-  const userTz = settings?.account.timezone ?? "UTC";
-  const use24hr = settings?.account.time_24hr ?? false;
-
-  const calShows = showsRes.status === 200 ? (showsRes.body as CalendarShow[]) : [];
-  const calMovies = moviesRes.status === 200 ? (moviesRes.body as CalendarMovie[]) : [];
-
-  // Fetch images - deduplicate by tmdb ID
-  const showTmdbIds = [
-    ...new Set(calShows.map((s) => s.show?.ids?.tmdb).filter(Boolean)),
-  ] as number[];
-  const movieTmdbIds = [
-    ...new Set(calMovies.map((m) => m.movie?.ids?.tmdb).filter(Boolean)),
-  ] as number[];
-
-  const imageMap = new Map<string, { poster: string | null; backdrop: string | null }>();
-  const stillMap = new Map<string, string | null>();
-
-  await Promise.all([
-    ...showTmdbIds.map(async (id) => {
-      const imgs = await fetchTmdbImages(id, "tv");
-      imageMap.set(`tv-${id}`, imgs);
-    }),
-    ...movieTmdbIds.map(async (id) => {
-      const imgs = await fetchTmdbImages(id, "movie");
-      imageMap.set(`movie-${id}`, imgs);
-    }),
-    ...calShows.slice(0, 30).map(async (entry) => {
-      const tvId = entry.show?.ids?.tmdb;
-      const season = entry.episode?.season;
-      const epNum = entry.episode?.number;
-      if (!tvId || season == null || epNum == null) return;
-      const key = `still-${tvId}-${season}-${epNum}`;
-      const imgs = await fetchTmdbEpisodeImages(tvId, season, epNum);
-      stillMap.set(key, imgs.still);
-    }),
-  ]);
-
   const entries: CalendarEntry[] = [];
+  let userTz = "UTC";
+  let use24hr = false;
 
-  for (const entry of calShows) {
-    const show = entry.show;
-    const ep = entry.episode;
-    if (!show || !ep) continue;
+  try {
+    const client = await getAuthenticatedTraktClient();
 
-    const aired = entry.first_aired;
-    let date = "";
-    let time: string | undefined;
-    if (aired) {
-      const d = new Date(aired);
-      // Format date in the user's Trakt timezone (YYYY-MM-DD)
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: userTz,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).formatToParts(d);
-      date = `${parts.find((p) => p.type === "year")?.value}-${parts.find((p) => p.type === "month")?.value}-${parts.find((p) => p.type === "day")?.value}`;
-      // Format time in the user's Trakt timezone
-      time = d.toLocaleTimeString("en-US", {
-        timeZone: userTz,
-        hour: "numeric",
-        minute: "2-digit",
-        ...(use24hr ? { hour12: false } : {}),
+    const fetchShows = type !== "movies";
+    const fetchMovies = type !== "shows";
+
+    const [showsRes, moviesRes, settings] = await Promise.all([
+      fetchShows
+        ? client.calendars.shows({
+            params: { target: "my", start_date: startStr, days },
+            query: { extended: "full" },
+          })
+        : Promise.resolve({ status: 200 as const, body: [] }),
+      fetchMovies
+        ? client.calendars.movies({
+            params: { target: "my", start_date: startStr, days },
+            query: { extended: "full" },
+          })
+        : Promise.resolve({ status: 200 as const, body: [] }),
+      getUserSettings(),
+    ]);
+
+    userTz = settings?.account.timezone ?? "UTC";
+    use24hr = settings?.account.time_24hr ?? false;
+
+    const calShows = showsRes.status === 200 ? (showsRes.body as CalendarShow[]) : [];
+    const calMovies = moviesRes.status === 200 ? (moviesRes.body as CalendarMovie[]) : [];
+
+    const showTmdbIds = [
+      ...new Set(calShows.map((s) => s.show?.ids?.tmdb).filter(Boolean)),
+    ] as number[];
+    const movieTmdbIds = [
+      ...new Set(calMovies.map((m) => m.movie?.ids?.tmdb).filter(Boolean)),
+    ] as number[];
+
+    const imageMap = new Map<string, { poster: string | null; backdrop: string | null }>();
+    const stillMap = new Map<string, string | null>();
+
+    await Promise.all([
+      ...showTmdbIds.map(async (id) => {
+        const imgs = await fetchTmdbImages(id, "tv").catch(() => ({
+          poster: null,
+          backdrop: null,
+        }));
+        imageMap.set(`tv-${id}`, imgs);
+      }),
+      ...movieTmdbIds.map(async (id) => {
+        const imgs = await fetchTmdbImages(id, "movie").catch(() => ({
+          poster: null,
+          backdrop: null,
+        }));
+        imageMap.set(`movie-${id}`, imgs);
+      }),
+      ...calShows.slice(0, 30).map(async (entry) => {
+        const tvId = entry.show?.ids?.tmdb;
+        const season = entry.episode?.season;
+        const epNum = entry.episode?.number;
+        if (!tvId || season == null || epNum == null) return;
+        const key = `still-${tvId}-${season}-${epNum}`;
+        const imgs = await fetchTmdbEpisodeImages(tvId, season, epNum).catch(() => ({
+          still: null,
+        }));
+        stillMap.set(key, imgs.still);
+      }),
+    ]);
+
+    for (const entry of calShows) {
+      const show = entry.show;
+      const ep = entry.episode;
+      if (!show || !ep) continue;
+
+      const aired = entry.first_aired;
+      let date = "";
+      let time: string | undefined;
+      if (aired) {
+        const d = new Date(aired);
+        // Format date in the user's Trakt timezone (YYYY-MM-DD)
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: userTz,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).formatToParts(d);
+        date = `${parts.find((p) => p.type === "year")?.value}-${parts.find((p) => p.type === "month")?.value}-${parts.find((p) => p.type === "day")?.value}`;
+        // Format time in the user's Trakt timezone
+        time = d.toLocaleTimeString("en-US", {
+          timeZone: userTz,
+          hour: "numeric",
+          minute: "2-digit",
+          ...(use24hr ? { hour12: false } : {}),
+        });
+      }
+
+      const imgs = imageMap.get(`tv-${show.ids?.tmdb}`);
+      const still = stillMap.get(`still-${show.ids?.tmdb}-${ep.season}-${ep.number}`);
+      const epLabel = `S${String(ep.season).padStart(2, "0")}E${String(ep.number).padStart(2, "0")}`;
+
+      entries.push({
+        date,
+        title: show.title ?? "Unknown",
+        subtitle: ep.title ? `${epLabel} · ${ep.title}` : epLabel,
+        href: `/shows/${show.ids?.slug}/seasons/${ep.season}/episodes/${ep.number}`,
+        posterUrl: imgs?.poster ?? null,
+        stillUrl: still ?? imgs?.backdrop ?? null,
+        rating: ep.rating ?? show.rating,
+        mediaType: "shows",
+        ids: show.ids ?? {},
+        time,
+        overview: ep.overview,
       });
     }
 
-    const imgs = imageMap.get(`tv-${show.ids?.tmdb}`);
-    const still = stillMap.get(`still-${show.ids?.tmdb}-${ep.season}-${ep.number}`);
-    const epLabel = `S${String(ep.season).padStart(2, "0")}E${String(ep.number).padStart(2, "0")}`;
+    for (const entry of calMovies) {
+      const movie = entry.movie;
+      if (!movie) continue;
 
-    entries.push({
-      date,
-      title: show.title ?? "Unknown",
-      subtitle: ep.title ? `${epLabel} · ${ep.title}` : epLabel,
-      href: `/shows/${show.ids?.slug}/seasons/${ep.season}/episodes/${ep.number}`,
-      posterUrl: imgs?.poster ?? null,
-      stillUrl: still ?? imgs?.backdrop ?? null,
-      rating: ep.rating ?? show.rating,
-      mediaType: "shows",
-      ids: show.ids ?? {},
-      time,
-      overview: ep.overview,
-    });
-  }
+      const date = entry.released ?? "";
+      const imgs = imageMap.get(`movie-${movie.ids?.tmdb}`);
 
-  for (const entry of calMovies) {
-    const movie = entry.movie;
-    if (!movie) continue;
-
-    const date = entry.released ?? "";
-    const imgs = imageMap.get(`movie-${movie.ids?.tmdb}`);
-
-    entries.push({
-      date,
-      title: movie.title ?? "Unknown",
-      subtitle:
-        [movie.year && String(movie.year), movie.runtime && `${movie.runtime}m`]
-          .filter(Boolean)
-          .join(" · ") || undefined,
-      href: `/movies/${movie.ids?.slug}`,
-      posterUrl: imgs?.poster ?? null,
-      stillUrl: imgs?.backdrop ?? null,
-      rating: movie.rating,
-      mediaType: "movies",
-      ids: movie.ids ?? {},
-      overview: movie.overview,
-    });
+      entries.push({
+        date,
+        title: movie.title ?? "Unknown",
+        subtitle:
+          [movie.year && String(movie.year), movie.runtime && `${movie.runtime}m`]
+            .filter(Boolean)
+            .join(" · ") || undefined,
+        href: `/movies/${movie.ids?.slug}`,
+        posterUrl: imgs?.poster ?? null,
+        stillUrl: imgs?.backdrop ?? null,
+        rating: movie.rating,
+        mediaType: "movies",
+        ids: movie.ids ?? {},
+        overview: movie.overview,
+      });
+    }
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Calendar Page] Failed to load calendar:", error);
+    }
   }
 
   // Build date range for the view

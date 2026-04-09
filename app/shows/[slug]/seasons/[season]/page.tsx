@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "@/components/ui/link";
 import { requestWithPolicy } from "@/lib/api/http";
 import { createTraktClient } from "@/lib/trakt";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import type { ShowSummary } from "@/lib/types";
@@ -16,20 +17,29 @@ interface Props {
 export default async function SeasonPage({ params }: Props) {
   const { slug, season: seasonStr } = await params;
   const seasonNumber = parseInt(seasonStr, 10);
-  const client = createTraktClient();
+  let showRes: { status: number; body?: unknown } = { status: 500 };
+  let episodesRes: { status: number; body?: unknown } = { status: 500 };
+  let seasonsRes: { status: number; body?: unknown } = { status: 500 };
 
-  const [showRes, episodesRes, seasonsRes] = await Promise.all([
-    client.shows.summary({
-      params: { id: slug },
-      query: { extended: "full" },
-    }),
-    client.shows.season.episodes({
-      // @ts-expect-error - ts-rest index signature mismatch
-      params: { id: slug, season: seasonNumber },
-      query: { extended: "full" },
-    }),
-    client.shows.seasons({ params: { id: slug }, query: { extended: "full" } }),
-  ]);
+  try {
+    const client = createTraktClient();
+    [showRes, episodesRes, seasonsRes] = await Promise.all([
+      client.shows.summary({
+        params: { id: slug },
+        query: { extended: "full" },
+      }),
+      client.shows.season.episodes({
+        // @ts-expect-error - ts-rest index signature mismatch
+        params: { id: slug, season: seasonNumber },
+        query: { extended: "full" },
+      }),
+      client.shows.seasons({ params: { id: slug }, query: { extended: "full" } }),
+    ]);
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Season Page] Failed to load season data:", error);
+    }
+  }
 
   if (showRes.status !== 200) {
     return (
@@ -41,7 +51,7 @@ export default async function SeasonPage({ params }: Props) {
 
   const show = showRes.body as unknown as ShowSummary;
   const images = show.ids?.tmdb
-    ? await fetchTmdbImages(show.ids.tmdb, "tv")
+    ? await fetchTmdbImages(show.ids.tmdb, "tv").catch(() => ({ poster: null, backdrop: null }))
     : { poster: null, backdrop: null };
 
   type Episode = {
@@ -114,7 +124,10 @@ export default async function SeasonPage({ params }: Props) {
         }
       }
     }
-  } catch {
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Season Page] Failed to load user progress:", error);
+    }
     // Not authenticated — no user data
   }
 

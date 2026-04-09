@@ -3,6 +3,7 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { StartWatchingFilter } from "./start-watching-filter";
 
 const START_WATCHING_CACHE_TTL_MS = 30_000;
@@ -77,7 +78,9 @@ async function getEpisodeMetadata(client: any, showId: string | number) {
             }
             return null;
           } catch (error) {
-            console.error(`[Pletra] Error fetching episode metadata for show ${showId}:`, error);
+            if (!isTraktExpectedError(error)) {
+              console.error(`[Pletra] Error fetching episode metadata for show ${showId}:`, error);
+            }
             return null;
           }
         },
@@ -94,13 +97,13 @@ async function getCachedStartWatchingData(userKey: string) {
         `dashboard:start-watching:${userKey}`,
         START_WATCHING_CACHE_TTL_MS,
         async () => {
-          const client = await getAuthenticatedTraktClient();
-
-          if (!client) {
-            return { showItems: [] as MediaItem[], movieItems: [] as MediaItem[] };
-          }
-
           try {
+            const client = await getAuthenticatedTraktClient();
+
+            if (!client) {
+              return { showItems: [] as MediaItem[], movieItems: [] as MediaItem[] };
+            }
+
             const [
               showWatchlistRes,
               movieWatchlistRes,
@@ -144,8 +147,10 @@ async function getCachedStartWatchingData(userKey: string) {
                 .shows({
                   params: { id: "me" },
                 })
-                .catch((err: any) => {
-                  console.error("[Pletra] Failed to fetch show ratings:", err);
+                .catch((error: any) => {
+                  if (!isTraktExpectedError(error)) {
+                    console.error("[Pletra] Failed to fetch show ratings:", error);
+                  }
                   return { status: 403, body: [] };
                 }),
 
@@ -153,8 +158,10 @@ async function getCachedStartWatchingData(userKey: string) {
                 .movies({
                   params: { id: "me" },
                 })
-                .catch((err: any) => {
-                  console.error("[Pletra] Failed to fetch movie ratings:", err);
+                .catch((error: any) => {
+                  if (!isTraktExpectedError(error)) {
+                    console.error("[Pletra] Failed to fetch movie ratings:", error);
+                  }
                   return { status: 403, body: [] };
                 }),
             ]);
@@ -174,8 +181,9 @@ async function getCachedStartWatchingData(userKey: string) {
 
             if (Array.isArray(movieRatingsRes?.body)) {
               movieRatingsRes.body.forEach((r: any) => {
-                if (r.movie?.ids?.trakt && r.rating)
+                if (r.movie?.ids?.trakt && r.rating) {
                   movieRatingMap.set(r.movie.ids.trakt, r.rating);
+                }
               });
             }
 
@@ -194,10 +202,14 @@ async function getCachedStartWatchingData(userKey: string) {
                 ),
               ),
               Promise.all(
-                (showWatchlist as any[]).map((item) => fetchTmdbImages(item.show?.ids?.tmdb, "tv")),
+                (showWatchlist as any[]).map((item) =>
+                  fetchTmdbImages(item.show?.ids?.tmdb, "tv").catch(() => null),
+                ),
               ),
               Promise.all(
-                filteredMovies.map((item) => fetchTmdbImages(item.movie?.ids?.tmdb, "movie")),
+                filteredMovies.map((item) =>
+                  fetchTmdbImages(item.movie?.ids?.tmdb, "movie").catch(() => null),
+                ),
               ),
             ]);
 
@@ -228,7 +240,7 @@ async function getCachedStartWatchingData(userKey: string) {
               title: item.movie?.title ?? "Unknown",
               subtitle: [item.movie?.year, item.movie?.runtime && formatRuntime(item.movie.runtime)]
                 .filter(Boolean)
-                .join(" · "),
+                .join(" - "),
               href: `/movies/${item.movie?.ids?.slug}`,
               backdropUrl: movieImages[i]?.backdrop ?? null,
               posterUrl: movieImages[i]?.poster ?? null,
@@ -243,7 +255,9 @@ async function getCachedStartWatchingData(userKey: string) {
 
             return { showItems, movieItems };
           } catch (error) {
-            console.error("[Pletra] Critical error in StartWatching component:", error);
+            if (!isTraktExpectedError(error)) {
+              console.error("[Pletra] Critical error in StartWatching component:", error);
+            }
             return { showItems: [] as MediaItem[], movieItems: [] as MediaItem[] };
           }
         },
@@ -254,19 +268,29 @@ async function getCachedStartWatchingData(userKey: string) {
 
 export async function StartWatching() {
   return measureAsync("dashboard:start-watching:section", async () => {
-    const userKey = (await getCurrentUser())?.slug ?? "me";
-    const { showItems, movieItems } = await getCachedStartWatchingData(userKey);
-    const rotationBucket = Math.floor(Date.now() / START_WATCHING_ROTATION_WINDOW_MS);
-    const shuffledShowItems = deterministicShuffle(showItems, `${userKey}:shows:${rotationBucket}`);
-    const shuffledMovieItems = deterministicShuffle(
-      movieItems,
-      `${userKey}:movies:${rotationBucket}`,
-    );
+    try {
+      const userKey = (await getCurrentUser())?.slug ?? "me";
+      const { showItems, movieItems } = await getCachedStartWatchingData(userKey);
+      const rotationBucket = Math.floor(Date.now() / START_WATCHING_ROTATION_WINDOW_MS);
+      const shuffledShowItems = deterministicShuffle(
+        showItems,
+        `${userKey}:shows:${rotationBucket}`,
+      );
+      const shuffledMovieItems = deterministicShuffle(
+        movieItems,
+        `${userKey}:movies:${rotationBucket}`,
+      );
 
-    return (
-      <div className="w-full overflow-x-hidden px-1 sm:px-0">
-        <StartWatchingFilter showItems={shuffledShowItems} movieItems={shuffledMovieItems} />
-      </div>
-    );
+      return (
+        <div className="w-full overflow-x-hidden px-1 sm:px-0">
+          <StartWatchingFilter showItems={shuffledShowItems} movieItems={shuffledMovieItems} />
+        </div>
+      );
+    } catch (error) {
+      if (!isTraktExpectedError(error)) {
+        console.error("[Pletra] Start Watching Section Error:", error);
+      }
+      return null;
+    }
   });
 }

@@ -15,6 +15,7 @@ import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
 import { getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
 
 const UPCOMING_SCHEDULE_CACHE_TTL_MS = 60_000;
@@ -257,7 +258,7 @@ export async function UpcomingSchedule() {
         />
       );
     } catch (error: any) {
-      if (error?.message !== "TRAKT_UNAUTHORIZED") {
+      if (!isTraktExpectedError(error)) {
         console.error("[Upcoming Schedule Server Error]:", error);
       }
       return null;

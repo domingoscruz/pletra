@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "@/components/ui/link";
 import { requestWithPolicy } from "@/lib/api/http";
 import { createTraktClient } from "@/lib/trakt";
+import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import type { TraktRating } from "@/lib/types";
 import { formatRuntime } from "@/lib/format";
@@ -41,155 +42,174 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 async function Seasons({ slug, tmdbId }: { slug: string; tmdbId?: number }) {
-  const client = createTraktClient();
-  const res = await client.shows.seasons({ params: { id: slug }, query: { extended: "full" } });
-  if (res.status !== 200) return null;
+  try {
+    const client = createTraktClient();
+    const res = await client.shows.seasons({ params: { id: slug }, query: { extended: "full" } });
+    if (res.status !== 200) return null;
 
-  type Season = {
-    number?: number;
-    episode_count?: number;
-    aired_episodes?: number;
-    rating?: number;
-    ids?: { trakt?: number };
-  };
+    type Season = {
+      number?: number;
+      episode_count?: number;
+      aired_episodes?: number;
+      rating?: number;
+      ids?: { trakt?: number };
+    };
 
-  const seasons = (res.body as Season[]).filter((s) => (s.number ?? 0) > 0);
-  if (seasons.length === 0) return null;
+    const seasons = (res.body as Season[]).filter((s) => (s.number ?? 0) > 0);
+    if (seasons.length === 0) return null;
 
-  const seasonImages = await Promise.all(
-    seasons.map(async (s) => {
-      if (!tmdbId) return null;
-      try {
-        const r = await requestWithPolicy(
-          `https://api.themoviedb.org/3/tv/${tmdbId}/season/${s.number}?api_key=${process.env.TMDB_API_KEY}`,
-          { next: { revalidate: 604800 } },
-          { timeoutMs: 10000, maxRetries: 2 },
-        );
-        if (!r.ok) return null;
-        const data = await r.json<{ poster_path?: string }>();
-        return data.poster_path ? `https://image.tmdb.org/t/p/w300${data.poster_path}` : null;
-      } catch {
-        return null;
-      }
-    }),
-  );
+    const seasonImages = await Promise.all(
+      seasons.map(async (s) => {
+        if (!tmdbId) return null;
+        try {
+          const r = await requestWithPolicy(
+            `https://api.themoviedb.org/3/tv/${tmdbId}/season/${s.number}?api_key=${process.env.TMDB_API_KEY}`,
+            { next: { revalidate: 604800 } },
+            { timeoutMs: 10000, maxRetries: 2 },
+          );
+          if (!r.ok) return null;
+          const data = await r.json<{ poster_path?: string }>();
+          return data.poster_path ? `https://image.tmdb.org/t/p/w300${data.poster_path}` : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
 
-  return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-zinc-200">
-        Seasons
-      </h3>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-        {seasons.map((season, i) => {
-          const pct = season.rating ? Math.round(season.rating * 10) : null;
-          return (
+    return (
+      <div>
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-zinc-200">
+          Seasons
+        </h3>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
+          {seasons.map((season, i) => {
+            const pct = season.rating ? Math.round(season.rating * 10) : null;
+            return (
+              <Link
+                key={season.number}
+                href={`/shows/${slug}/seasons/${season.number}`}
+                className="group overflow-hidden rounded-lg bg-zinc-900"
+              >
+                <div className="relative aspect-[2/3]">
+                  {seasonImages[i] ? (
+                    <Image
+                      src={seasonImages[i]!}
+                      alt={`Season ${season.number}`}
+                      fill
+                      className="object-cover transition-transform group-hover:scale-105"
+                      sizes="160px"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center bg-zinc-800 text-2xl font-bold text-zinc-700">
+                      {season.number}
+                    </div>
+                  )}
+                  {pct != null && pct > 0 && (
+                    <div className="absolute top-1.5 right-1.5 rounded bg-green-500/90 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                      {pct}%
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black to-transparent px-2 pt-10 pb-1.5">
+                    <p className="text-[11px] font-semibold text-white">Season {season.number}</p>
+                    <p className="text-[9px] text-zinc-400">
+                      {season.aired_episodes ?? season.episode_count ?? 0} eps
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    );
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Show Page] Seasons fetch failed:", error);
+    }
+    return null;
+  }
+}
+
+async function ShowCast({ slug }: { slug: string }) {
+  try {
+    const client = createTraktClient();
+    const res = await client.shows.people({ params: { id: slug } });
+    if (res.status !== 200) return null;
+
+    type CastMember = {
+      characters?: string[];
+      character?: string;
+      person?: { name?: string; ids?: { trakt?: number; slug?: string; tmdb?: number } };
+    };
+    const body = res.body as { cast?: CastMember[] };
+    const cast = body.cast?.slice(0, 20) ?? [];
+    if (cast.length === 0) return null;
+
+    const photos = await Promise.all(
+      cast.map((m) =>
+        m.person?.ids?.tmdb ? fetchTmdbPersonImage(m.person.ids.tmdb) : Promise.resolve(null),
+      ),
+    );
+
+    return (
+      <div>
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-zinc-200">Cast</h3>
+        <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-hide">
+          {cast.map((member, i) => (
             <Link
-              key={season.number}
-              href={`/shows/${slug}/seasons/${season.number}`}
-              className="group overflow-hidden rounded-lg bg-zinc-900"
+              key={member.person?.ids?.trakt}
+              href={`/people/${member.person?.ids?.slug ?? member.person?.ids?.trakt}`}
+              className="group relative w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-900"
             >
-              <div className="relative aspect-[2/3]">
-                {seasonImages[i] ? (
+              <div className="relative aspect-[3/4]">
+                {photos[i] ? (
                   <Image
-                    src={seasonImages[i]!}
-                    alt={`Season ${season.number}`}
+                    src={photos[i]!}
+                    alt={member.person?.name ?? ""}
                     fill
                     className="object-cover transition-transform group-hover:scale-105"
-                    sizes="160px"
+                    sizes="112px"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center bg-zinc-800 text-2xl font-bold text-zinc-700">
-                    {season.number}
+                  <div className="flex h-full items-center justify-center bg-zinc-800 text-xl text-zinc-700">
+                    👤
                   </div>
                 )}
-                {pct != null && pct > 0 && (
-                  <div className="absolute top-1.5 right-1.5 rounded bg-green-500/90 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {pct}%
-                  </div>
-                )}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black to-transparent px-2 pt-10 pb-1.5">
-                  <p className="text-[11px] font-semibold text-white">Season {season.number}</p>
-                  <p className="text-[9px] text-zinc-400">
-                    {season.aired_episodes ?? season.episode_count ?? 0} eps
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-1.5 pt-6 pb-1">
+                  <p className="truncate text-[10px] font-semibold text-white">
+                    {member.person?.name}
+                  </p>
+                  <p className="truncate text-[9px] text-zinc-400">
+                    {member.characters?.[0] ?? member.character ?? ""}
                   </p>
                 </div>
               </div>
             </Link>
-          );
-        })}
+          ))}
+        </div>
       </div>
-    </div>
-  );
-}
-
-async function ShowCast({ slug }: { slug: string }) {
-  const client = createTraktClient();
-  const res = await client.shows.people({ params: { id: slug } });
-  if (res.status !== 200) return null;
-
-  type CastMember = {
-    characters?: string[];
-    character?: string;
-    person?: { name?: string; ids?: { trakt?: number; slug?: string; tmdb?: number } };
-  };
-  const body = res.body as { cast?: CastMember[] };
-  const cast = body.cast?.slice(0, 20) ?? [];
-  if (cast.length === 0) return null;
-
-  const photos = await Promise.all(
-    cast.map((m) =>
-      m.person?.ids?.tmdb ? fetchTmdbPersonImage(m.person.ids.tmdb) : Promise.resolve(null),
-    ),
-  );
-
-  return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-widest text-zinc-200">Cast</h3>
-      <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-hide">
-        {cast.map((member, i) => (
-          <Link
-            key={member.person?.ids?.trakt}
-            href={`/people/${member.person?.ids?.slug ?? member.person?.ids?.trakt}`}
-            className="group relative w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-900"
-          >
-            <div className="relative aspect-[3/4]">
-              {photos[i] ? (
-                <Image
-                  src={photos[i]!}
-                  alt={member.person?.name ?? ""}
-                  fill
-                  className="object-cover transition-transform group-hover:scale-105"
-                  sizes="112px"
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center bg-zinc-800 text-xl text-zinc-700">
-                  👤
-                </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-1.5 pt-6 pb-1">
-                <p className="truncate text-[10px] font-semibold text-white">
-                  {member.person?.name}
-                </p>
-                <p className="truncate text-[9px] text-zinc-400">
-                  {member.characters?.[0] ?? member.character ?? ""}
-                </p>
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
+    );
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Show Page] Cast fetch failed:", error);
+    }
+    return null;
+  }
 }
 
 export default async function ShowPage({ params }: Props) {
   const { slug } = await params;
-  const client = createTraktClient();
+  const showData = await getShowData(slug);
+  let ratingsRes: { status: number; body?: unknown } = { status: 500 };
 
-  const [showData, ratingsRes] = await Promise.all([
-    getShowData(slug),
-    client.shows.ratings({ params: { id: slug } }),
-  ]);
+  try {
+    const client = createTraktClient();
+    ratingsRes = await client.shows.ratings({ params: { id: slug } });
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Show Page] Ratings fetch failed:", error);
+    }
+  }
 
   if (!showData) {
     return (
@@ -226,8 +246,10 @@ export default async function ShowPage({ params }: Props) {
         showProgress = { completed: progress.completed, aired: progress.aired };
       }
     }
-  } catch {
-    /* not authenticated */
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Show Page] Authenticated state fetch failed:", error);
+    }
   }
 
   const { genres, status } = show;
