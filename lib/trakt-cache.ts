@@ -13,6 +13,7 @@ interface TraktSeasonSummary {
   number?: number | null;
   aired_episodes?: number | null;
   episode_count?: number | null;
+  total_episodes?: number | null;
   episodes?: TraktEpisodeSummary[] | null;
 }
 
