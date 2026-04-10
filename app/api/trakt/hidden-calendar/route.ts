@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(_request: NextRequest) {
   return NextResponse.json(
     { error: "Restore for hidden calendar shows is not implemented yet." },
     { status: 405 },

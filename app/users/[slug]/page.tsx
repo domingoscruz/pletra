@@ -215,7 +215,7 @@ async function UserHistory({ slug }: { slug: string }) {
   }
 }
 
-function SectionSkeleton({ title }: { title: string }) {
+function SectionSkeleton({ title: _title }: { title: string }) {
   return (
     <div className="space-y-3">
       <div className="mb-3 flex items-center gap-3">

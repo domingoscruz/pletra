@@ -11,19 +11,19 @@ import { useProgress } from "@bprogress/next";
  * BProgress's built-in router interception doesn't detect the navigation.
  */
 export function useNavigate() {
-	const router = useRouter();
-	const [isPending, startTransition] = useTransition();
-	const { start, stop } = useProgress();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const { start } = useProgress();
 
-	const navigate = useCallback(
-		(url: string) => {
-			start();
-			startTransition(() => {
-				router.push(url);
-			});
-		},
-		[router, start],
-	);
+  const navigate = useCallback(
+    (url: string) => {
+      start();
+      startTransition(() => {
+        router.push(url);
+      });
+    },
+    [router, start],
+  );
 
-	return { navigate, isPending };
+  return { navigate, isPending };
 }

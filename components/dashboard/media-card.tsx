@@ -118,7 +118,7 @@ export function MediaCard({
   specialTag,
   status,
   statusBadge,
-  badge,
+  badge: _badge,
   timeBadge,
   timeBadgeTooltip,
   isWatched = false,
@@ -488,6 +488,7 @@ export function MediaCard({
                     onMouseLeave={() => setIsTitleActionHovered(false)}
                     className="shrink-0 text-zinc-400 transition-colors hover:text-white"
                     aria-label="Hide this show"
+                    title="Hide this show"
                   >
                     <svg
                       className="h-3.5 w-3.5"

@@ -85,7 +85,7 @@ const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
 const PROGRESS_SHOW_DETAIL_TTL_MS = 30 * 60_000;
 const DETAIL_FILTERS = new Set(["returning", "ended", "completed", "not-completed"]);
-const PROGRESS_SHOW_CACHE_VERSION = "v3";
+const PROGRESS_SHOW_CACHE_VERSION = "v4";
 
 /**
  * Extracts image URLs from Trakt objects based on available types
@@ -129,7 +129,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (item: T, index: number) => Promise<R>,
 ) {
-  const results: R[] = new Array(items.length);
+  const results = Array.from({ length: items.length }, () => undefined as R | undefined);
   let nextIndex = 0;
 
   const worker = async () => {
@@ -146,7 +146,7 @@ async function mapWithConcurrency<T, R>(
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
 
   await Promise.all(workers);
-  return results;
+  return results as R[];
 }
 
 function aggregateSeasonTotals(seasons: CachedProgressSeasonItem[]) {
@@ -381,7 +381,8 @@ async function getCachedProgressShowDetails(
               runtimeLeft: remainingEpisodes.reduce((total, episode) => total + episode.runtime, 0),
               episodes,
             };
-          });
+          })
+          .filter((season) => season.aired > 0);
 
         const trueLastEpisode = seasons
           .flatMap((season) => season.episodes)
@@ -710,7 +711,7 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     const backdropImage = items.length > 0 ? items[0].backdropUrl || items[0].posterUrl : null;
 
     return (
-      <main className="relative min-h-screen bg-black">
+      <main className="relative bg-black">
         {backdropImage && (
           <div className="fixed inset-0 -z-10 overflow-hidden">
             <Image
@@ -724,8 +725,8 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
           </div>
         )}
 
-        <div className="relative z-10 mx-auto max-w-[112.5rem] px-0 pb-20 pt-1 md:pt-2">
-          <div className="rounded-2xl bg-black/40 p-3 backdrop-blur-md md:p-5">
+        <div className="relative z-10 mx-auto max-w-[112.5rem] px-0 pb-4 pt-1 md:pb-6 md:pt-2">
+          <div className="min-h-[calc(100dvh-3.25rem)] rounded-2xl bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
             <ProgressClient
               slug={slug}
               items={items}

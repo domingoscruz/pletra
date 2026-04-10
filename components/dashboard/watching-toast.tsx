@@ -82,7 +82,7 @@ export function WatchingToast() {
   const [timeLeft, setTimeLeft] = useState<string>("");
 
   const [isRatingPhase, setIsRatingPhase] = useState(false);
-  const [ratingCountdown, setRatingCountdown] = useState(30);
+  const [, setRatingCountdown] = useState(30);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [submittedRating, setSubmittedRating] = useState<number | null>(null);
   const [isLoadingRating, setIsLoadingRating] = useState(false);
@@ -385,7 +385,10 @@ export function WatchingToast() {
   if (isMinimized) {
     return (
       <button
+        type="button"
         onClick={() => setIsMinimized(false)}
+        aria-label="Expand watching toast"
+        title="Expand watching toast"
         className="fixed bottom-6 right-6 z-[100] flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-black shadow-2xl transition-all hover:scale-105 active:scale-95 animate-in fade-in slide-in-from-bottom-2"
       >
         <div className="absolute top-0 right-0 z-10 flex h-3 w-3 items-center justify-center">
@@ -460,13 +463,19 @@ export function WatchingToast() {
           </div>
           <div className="flex items-center gap-1.5">
             <button
+              type="button"
               onClick={() => setIsMinimized(true)}
+              aria-label="Minimize watching toast"
+              title="Minimize watching toast"
               className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
             >
               <Minus size={14} />
             </button>
             <button
+              type="button"
               onClick={() => (isRatingPhase ? hideRatingPhase() : setShowCancelConfirm(true))}
+              aria-label={isRatingPhase ? "Close rating prompt" : "Close watching toast"}
+              title={isRatingPhase ? "Close rating prompt" : "Close watching toast"}
               className="rounded-lg bg-zinc-900 p-1.5 text-zinc-500 hover:text-white transition-all"
             >
               <X size={14} />

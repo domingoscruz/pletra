@@ -9,6 +9,6 @@ type ImageProps = ComponentProps<typeof Image>;
  * URLs going through our image proxy (to avoid double-fetching).
  */
 export function ProxiedImage(props: ImageProps) {
-	const src = typeof props.src === "string" ? props.src : "";
-	return <Image {...props} unoptimized={props.unoptimized ?? isProxiedUrl(src)} />;
+  const src = typeof props.src === "string" ? props.src : "";
+  return <Image {...props} unoptimized={props.unoptimized ?? isProxiedUrl(src)} />;
 }

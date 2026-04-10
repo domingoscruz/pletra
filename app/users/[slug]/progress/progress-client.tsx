@@ -694,8 +694,6 @@ interface HistoryMenuProps {
   nextEpisodeTraktId?: number;
   showTraktId: number;
   lastEpisodeTraktId?: number;
-  lastEpisodeHistoryId?: number;
-  lastEpisodeWatchedAt?: string | null;
   manageHistoryMode?: boolean;
   onToast: (message: string) => void;
   onLocalUpdate?: (update: {
@@ -714,8 +712,6 @@ function ProgressHistoryMenu({
   nextEpisodeTraktId,
   showTraktId,
   lastEpisodeTraktId,
-  lastEpisodeHistoryId,
-  lastEpisodeWatchedAt,
   manageHistoryMode = false,
   onToast,
   onLocalUpdate,
@@ -891,45 +887,6 @@ function ProgressHistoryMenu({
       onClose();
     } else {
       onToast(result.message ?? "Failed to update history.");
-    }
-
-    setIsLoading(false);
-  };
-
-  const handleRemoveThisPlay = async () => {
-    if ((!lastEpisodeHistoryId && (!lastEpisodeTraktId || !lastEpisodeWatchedAt)) || isLoading)
-      return;
-    setIsLoading(true);
-
-    const result = lastEpisodeHistoryId
-      ? await (async (): Promise<{ ok: boolean; message?: string }> => {
-          try {
-            await fetchTraktRouteJson("/api/trakt/sync/history/remove", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ids: [lastEpisodeHistoryId] }),
-              timeoutMs: 10000,
-            });
-            return { ok: true };
-          } catch (error) {
-            return { ok: false, message: getErrorMessage(error, "Failed to remove play.") };
-          }
-        })()
-      : await syncTraktData(
-          {
-            type: "episodes",
-            ids: { trakt: lastEpisodeTraktId },
-            action: "remove",
-            date: lastEpisodeWatchedAt ?? undefined,
-          },
-          "history",
-        );
-
-    if (result.ok) {
-      onToast("Removed play.");
-      onClose();
-    } else {
-      onToast(result.message ?? "Failed to remove play.");
     }
 
     setIsLoading(false);
@@ -1193,7 +1150,12 @@ function ProgressHistoryMenu({
                 <span className="text-[11px] font-black uppercase tracking-tight text-white">
                   When did you watch this?
                 </span>
-                <button onClick={() => setShowOtherDatePicker(false)}>
+                <button
+                  type="button"
+                  onClick={() => setShowOtherDatePicker(false)}
+                  aria-label="Close date picker"
+                  title="Close date picker"
+                >
                   <svg
                     className="h-4 w-4 text-zinc-500"
                     fill="none"
@@ -1229,7 +1191,10 @@ function ProgressHistoryMenu({
                 </div>
                 <div className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => setShowOtherDatePicker(false)}
+                    aria-label="Cancel date selection"
+                    title="Cancel date selection"
                     className="rounded bg-zinc-800 p-2 text-zinc-400 transition-colors hover:text-white"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1242,11 +1207,14 @@ function ProgressHistoryMenu({
                     </svg>
                   </button>
                   <button
+                    type="button"
                     onClick={() =>
                       manageHistoryMode
                         ? handleAddPlayToLastEpisode(selectedDate.toISOString())
                         : handleWatchAction(selectedDate.toISOString())
                     }
+                    aria-label="Confirm selected watch date"
+                    title="Confirm selected watch date"
                     className="rounded bg-green-600 p-2 text-white transition-colors hover:bg-green-500"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1264,7 +1232,10 @@ function ProgressHistoryMenu({
               <div className="relative mb-4 flex items-center justify-between px-1">
                 <div className="flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={handlePrevMonth}
+                    aria-label="Previous month"
+                    title="Previous month"
                     className="rounded p-1 transition-colors hover:bg-zinc-800"
                   >
                     <svg className="h-3 w-3 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
@@ -1272,7 +1243,10 @@ function ProgressHistoryMenu({
                     </svg>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setSelectedDate(getNearestQuarterHour(new Date()))}
+                    aria-label="Jump to today"
+                    title="Jump to today"
                     className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -1300,7 +1274,10 @@ function ProgressHistoryMenu({
                     </button>
                   </div>
                   <button
+                    type="button"
                     onClick={handleNextMonth}
+                    aria-label="Next month"
+                    title="Next month"
                     className="rounded p-1 transition-colors hover:bg-zinc-800"
                   >
                     <svg className="h-3 w-3 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
@@ -1398,7 +1375,10 @@ function ProgressHistoryMenu({
 
                   <div className="mt-4 flex items-center justify-between rounded border border-white/5 bg-zinc-950 p-1.5">
                     <button
+                      type="button"
                       onClick={() => adjustMinute(-1)}
+                      aria-label="Decrease time by one minute"
+                      title="Decrease time by one minute"
                       className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"
                     >
                       <svg
@@ -1419,7 +1399,10 @@ function ProgressHistoryMenu({
                       {currentFormattedTime}
                     </span>
                     <button
+                      type="button"
                       onClick={() => adjustMinute(1)}
+                      aria-label="Increase time by one minute"
+                      title="Increase time by one minute"
                       className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"
                     >
                       <svg
@@ -1537,7 +1520,7 @@ const ProgressShowRow = memo(
     const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
     const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
     const [hoverRating, setHoverRating] = useState<number | null>(null);
-    const [userRating, setUserRating] = useState<number | undefined>(item.userRating);
+    const [, setUserRating] = useState<number | undefined>(item.userRating);
     const [inWatchlist, setInWatchlist] = useState(false);
     const [showSeasonBreakdown, setShowSeasonBreakdown] = useState(false);
     const [isLoadingSeasons, setIsLoadingSeasons] = useState(false);
@@ -2032,6 +2015,7 @@ const ProgressShowRow = memo(
                     }
                     className="shrink-0 text-zinc-300 transition-colors hover:text-white"
                     aria-label={item.isDropped ? "Restore this show" : "Drop this show"}
+                    title={item.isDropped ? "Restore this show" : "Drop this show"}
                   >
                     <svg
                       className="h-4 w-4"
@@ -2249,6 +2233,7 @@ const ProgressShowRow = memo(
               className="flex h-[40px] items-stretch border-t border-white/5 bg-[#151515]"
             >
               <button
+                type="button"
                 ref={checkinButtonRef}
                 onClick={(event) => openMenu(event, "checkin")}
                 onMouseEnter={() => setHoveredAction("checkin")}
@@ -2261,6 +2246,8 @@ const ProgressShowRow = memo(
                     ? "bg-green-600 hover:bg-green-500"
                     : "bg-purple-600 hover:bg-purple-500",
                 )}
+                aria-label={shouldManageHistory ? "Open history actions" : "Open watch actions"}
+                title={shouldManageHistory ? "Open history actions" : "Open watch actions"}
               >
                 <svg
                   className="h-4 w-4"
@@ -2274,6 +2261,7 @@ const ProgressShowRow = memo(
               </button>
 
               <button
+                type="button"
                 ref={watchlistButtonRef}
                 onClick={(event) => openMenu(event, "watchlist")}
                 onMouseEnter={() => setHoveredAction("watchlist")}
@@ -2286,6 +2274,8 @@ const ProgressShowRow = memo(
                     ? "bg-[#23a5dd] text-white"
                     : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
                 )}
+                aria-label="Open watchlist actions"
+                title="Open watchlist actions"
               >
                 <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z" />
@@ -2295,6 +2285,7 @@ const ProgressShowRow = memo(
               {/* Conditionally render Global Rating button only if it's not undefined */}
               {(item.globalRating !== undefined || effectiveUserRating !== undefined) && (
                 <button
+                  type="button"
                   ref={ratingButtonRef}
                   onClick={(event) => openMenu(event, "rating")}
                   onMouseEnter={() => setHoveredAction("rating")}
@@ -2304,6 +2295,16 @@ const ProgressShowRow = memo(
                   className="ml-auto flex min-w-[74px] items-center justify-center gap-1.5 px-4 text-[#f16161] transition-colors hover:bg-white/5"
                   style={
                     effectiveUserRating ? { color: getRibbonColor(effectiveUserRating) } : undefined
+                  }
+                  aria-label={
+                    effectiveUserRating
+                      ? `Open rating actions, current rating ${effectiveUserRating} out of 10`
+                      : "Open rating actions"
+                  }
+                  title={
+                    effectiveUserRating
+                      ? `Open rating actions, current rating ${effectiveUserRating} out of 10`
+                      : "Open rating actions"
                   }
                 >
                   <svg
@@ -2332,8 +2333,6 @@ const ProgressShowRow = memo(
           nextEpisodeTraktId={next?.traktId}
           showTraktId={item.traktId}
           lastEpisodeTraktId={item.lastEpisodeWatched?.traktId}
-          lastEpisodeHistoryId={item.lastEpisodeWatched?.historyId}
-          lastEpisodeWatchedAt={item.lastEpisodeWatched?.watchedAt}
           manageHistoryMode={shouldManageHistory}
           onToast={(message) => {
             if (message === "Watched!") {
@@ -2411,11 +2410,14 @@ const ProgressShowRow = memo(
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => (
                 <button
                   key={value}
+                  type="button"
                   onMouseEnter={() => setHoverRating(value)}
                   onClick={() => {
                     setUserRating(value);
                     handleAction("ratings", "add", { rating: value });
                   }}
+                  aria-label={`Rate ${value} out of 10`}
+                  title={`Rate ${value} out of 10`}
                 >
                   <svg
                     className={cn(
@@ -2530,7 +2532,6 @@ export function ProgressClient({
 }: ProgressClientProps) {
   const { navigate, isPending } = useNavigate();
   const [searchInput, setSearchInput] = useState(activeSearch);
-  const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const paginationPages = useMemo(
     () => getPaginationWindow(currentPage, totalPages),
     [currentPage, totalPages],
@@ -2557,7 +2558,7 @@ export function ProgressClient({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[112.5rem] px-2 pb-24">
+    <div className="mx-auto flex min-h-full w-full max-w-[112.5rem] flex-col px-2 pb-4 md:pb-6">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="relative h-11 w-80">
           <input
@@ -2621,7 +2622,7 @@ export function ProgressClient({
       </div>
 
       {totalPages > 1 && (
-        <div className="mt-16 flex items-center justify-center gap-3 text-white">
+        <div className="mt-auto pt-8 flex items-center justify-center gap-3 text-white md:pt-10">
           <button
             onClick={() => navigate(buildUrl({ page: currentPage - 1 }))}
             disabled={currentPage <= 1 || isPending}

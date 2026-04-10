@@ -56,7 +56,7 @@ export function Comments({
   const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
   const [repliesMap, setRepliesMap] = useState<Map<number, CommentData[]>>(new Map());
   const [loadingReplies, setLoadingReplies] = useState<Set<number>>(new Set());
-  const [totalLoaded, setTotalLoaded] = useState(0);
+  const [, setTotalLoaded] = useState(0);
 
   const limit = defaultCount;
 

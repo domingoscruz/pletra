@@ -660,7 +660,12 @@ export function CardActions({
                     <span className="text-[11px] font-black uppercase tracking-tight text-white">
                       When did you watch this?
                     </span>
-                    <button onClick={() => setShowOtherDatePicker(false)}>
+                    <button
+                      type="button"
+                      onClick={() => setShowOtherDatePicker(false)}
+                      aria-label="Close date picker"
+                      title="Close date picker"
+                    >
                       <svg
                         className="h-4 w-4 text-zinc-500"
                         fill="none"
@@ -699,7 +704,10 @@ export function CardActions({
                     </div>
                     <div className="flex gap-2">
                       <button
+                        type="button"
                         onClick={() => setShowOtherDatePicker(false)}
+                        aria-label="Cancel date selection"
+                        title="Cancel date selection"
                         className="p-2 rounded bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
                       >
                         <svg
@@ -717,7 +725,10 @@ export function CardActions({
                         </svg>
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleWatchAction("add", selectedDate.toISOString())}
+                        aria-label="Confirm selected watch date"
+                        title="Confirm selected watch date"
                         className="p-2 rounded bg-green-600 text-white hover:bg-green-500 transition-colors"
                       >
                         <svg
@@ -740,7 +751,10 @@ export function CardActions({
                   <div className="flex items-center justify-between mb-4 relative px-1">
                     <div className="flex items-center gap-1">
                       <button
+                        type="button"
                         onClick={handlePrevMonth}
+                        aria-label="Previous month"
+                        title="Previous month"
                         className="p-1 hover:bg-zinc-800 rounded transition-colors"
                       >
                         <svg
@@ -752,7 +766,10 @@ export function CardActions({
                         </svg>
                       </button>
                       <button
+                        type="button"
                         onClick={handleGoHome}
+                        aria-label="Jump to today"
+                        title="Jump to today"
                         className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-400 hover:text-white"
                       >
                         <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -780,7 +797,10 @@ export function CardActions({
                         </button>
                       </div>
                       <button
+                        type="button"
                         onClick={handleNextMonth}
+                        aria-label="Next month"
+                        title="Next month"
                         className="p-1 hover:bg-zinc-800 rounded transition-colors"
                       >
                         <svg
@@ -880,7 +900,10 @@ export function CardActions({
 
                       <div className="mt-4 flex items-center justify-between bg-zinc-950 p-1.5 rounded border border-white/5">
                         <button
+                          type="button"
                           onClick={() => adjustMinute(-1)}
+                          aria-label="Decrease time by one minute"
+                          title="Decrease time by one minute"
                           className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white"
                         >
                           <svg
@@ -901,7 +924,10 @@ export function CardActions({
                           {currentFormattedTime}
                         </span>
                         <button
+                          type="button"
                           onClick={() => adjustMinute(1)}
+                          aria-label="Increase time by one minute"
+                          title="Increase time by one minute"
                           className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-white"
                         >
                           <svg
@@ -1007,8 +1033,11 @@ export function CardActions({
                   return (
                     <button
                       key={val}
+                      type="button"
                       onMouseEnter={() => setHoverRating(val)}
                       onClick={() => handleRatingAction(val)}
+                      aria-label={`Rate ${val} out of 10`}
+                      title={`Rate ${val} out of 10`}
                       className="transition-transform hover:scale-125"
                     >
                       <svg
@@ -1068,6 +1097,7 @@ export function CardActions({
 
       <div className="flex shrink-0">
         <button
+          type="button"
           onMouseEnter={(e) => handleMouseEnterTooltip(e, watched ? "Watched" : "Check-in")}
           onMouseLeave={() => setActiveTooltip(null)}
           onClick={(e) => {
@@ -1077,6 +1107,8 @@ export function CardActions({
             setShowRating(false);
             setShowListOptions(false);
           }}
+          aria-label={watched ? "Open history actions" : "Open watch actions"}
+          title={watched ? "Open history actions" : "Open watch actions"}
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all rounded-bl-lg",
             watched ? "bg-[#2d7a30]" : "bg-purple-600 hover:bg-purple-500",
@@ -1093,6 +1125,7 @@ export function CardActions({
           </svg>
         </button>
         <button
+          type="button"
           onMouseEnter={(e) => handleMouseEnterTooltip(e, "Watchlist")}
           onMouseLeave={() => setActiveTooltip(null)}
           onClick={(e) => {
@@ -1102,6 +1135,8 @@ export function CardActions({
             setShowWatchOptions(false);
             setShowRating(false);
           }}
+          aria-label="Open watchlist actions"
+          title="Open watchlist actions"
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all border-l border-white/10",
             inWatchlist
@@ -1118,6 +1153,7 @@ export function CardActions({
       <div className="flex-1" />
 
       <button
+        type="button"
         onMouseEnter={(e) =>
           handleMouseEnterTooltip(e, localRating ? `Rating: ${localRating}` : "Rate")
         }
@@ -1129,6 +1165,12 @@ export function CardActions({
           setShowWatchOptions(false);
           setShowListOptions(false);
         }}
+        aria-label={
+          localRating ? `Open rating actions, current rating ${localRating}` : "Open rating actions"
+        }
+        title={
+          localRating ? `Open rating actions, current rating ${localRating}` : "Open rating actions"
+        }
         className={cn(
           "flex h-8 shrink-0 items-center justify-center px-3 transition-colors hover:bg-zinc-800/80 rounded-br-lg",
           localRating ? "" : "text-zinc-500 hover:text-red-400",

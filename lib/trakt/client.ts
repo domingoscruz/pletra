@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
+import { requestWithPolicy } from "@/lib/api/http";
 import { headers } from "next/headers";
 
 /**

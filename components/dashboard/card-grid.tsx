@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface CardGridProps {
@@ -110,8 +110,11 @@ export function CardGrid({
 
             <div className="flex items-center gap-1">
               <button
+                type="button"
                 onClick={() => changePage("left")}
                 disabled={page === 0}
+                aria-label="Previous page"
+                title="Previous page"
                 className="p-1.5 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
               >
                 <svg
@@ -128,8 +131,11 @@ export function CardGrid({
                 </svg>
               </button>
               <button
+                type="button"
                 onClick={() => changePage("right")}
                 disabled={page === totalPages - 1}
+                aria-label="Next page"
+                title="Next page"
                 className="p-1.5 text-zinc-500 transition-colors hover:text-white disabled:cursor-default disabled:opacity-20"
               >
                 <svg

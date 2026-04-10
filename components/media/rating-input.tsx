@@ -72,10 +72,13 @@ export function RatingInput({
   return (
     <div ref={popoverRef} className="relative">
       <button
+        type="button"
         onClick={() => {
           setOpen(!open);
           setHovered(0);
         }}
+        aria-label={hasRating ? `Current rating ${localRating} out of 10` : "Open rating selector"}
+        title={hasRating ? `Current rating ${localRating} out of 10` : "Open rating selector"}
         className={`flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors ${
           hasRating
             ? activeButtonClass
@@ -99,6 +102,8 @@ export function RatingInput({
               <button
                 key={score}
                 type="button"
+                aria-label={`Rate ${score} out of 10`}
+                title={`Rate ${score} out of 10`}
                 className={`cursor-pointer px-0.5 text-base transition-colors ${
                   active ? activeIconClass : `text-zinc-600 ${inactiveHoverClass}`
                 }`}
