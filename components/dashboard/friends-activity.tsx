@@ -293,7 +293,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
               : (activity.movie?.title ?? "Unknown");
             const epLabel =
               isEpisode && activity.episode
-                ? `${activity.episode.season}Ã—${String(activity.episode.number).padStart(2, "0")}`
+                ? `${activity.episode.season}x${String(activity.episode.number).padStart(2, "0")}`
                 : "";
             const subtitle = isEpisode
               ? `${epLabel} ${activity.episode?.title || ""}`
