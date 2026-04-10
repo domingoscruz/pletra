@@ -106,8 +106,23 @@ export const getEpisodeData = cache(async (showSlug: string, season: number, epi
       params: { id: showSlug, season, episode },
       query: { extended: "full" },
     });
-    if (res.status !== 200) return null;
-    return res.body as unknown as EpisodeSummary;
+    if (res.status === 200) {
+      return res.body as unknown as EpisodeSummary;
+    }
+
+    const seasonRes = await client.shows.season.episodes({
+      // @ts-expect-error - ts-rest index signature mismatch
+      params: { id: showSlug, season },
+      query: { extended: "full" },
+    });
+    if (seasonRes.status !== 200 || !Array.isArray(seasonRes.body)) {
+      return null;
+    }
+
+    const fallbackEpisode = (seasonRes.body as EpisodeSummary[]).find(
+      (item) => item.number === episode,
+    );
+    return fallbackEpisode ?? null;
   } catch (error) {
     if (!isTraktExpectedError(error)) {
       console.error("[Metadata] Failed to fetch episode data:", error);

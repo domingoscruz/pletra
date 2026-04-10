@@ -198,6 +198,12 @@ async function getCachedRecentActivityItems(userKey: string) {
                 const metadata = isEpisode
                   ? episodeMetadataMap.get(item.episode?.ids?.trakt)
                   : null;
+                const fallbackEpisodeRating =
+                  typeof item.episode?.rating === "number" ? item.episode.rating : undefined;
+                const fallbackEpisodeReleasedAt =
+                  typeof item.episode?.first_aired === "string"
+                    ? item.episode.first_aired
+                    : undefined;
 
                 let specialTag: any = undefined;
                 if (isEpisode && metadata) {
@@ -231,14 +237,18 @@ async function getCachedRecentActivityItems(userKey: string) {
                     : `/movies/${item.movie?.ids?.slug}`,
                   showHref: isEpisode ? `/shows/${item.show?.ids?.slug}` : undefined,
                   backdropUrl: finalImageUrl,
-                  rating: isEpisode ? metadata?.rating : item.movie?.rating,
+                  rating: isEpisode
+                    ? (metadata?.rating ?? fallbackEpisodeRating)
+                    : item.movie?.rating,
                   userRating: isEpisode
                     ? epRatingMap.get(item.episode?.ids?.trakt)
                     : movieRatingMap.get(item.movie?.ids?.trakt),
                   mediaType: isEpisode ? ("shows" as const) : ("movies" as const),
                   ids: isEpisode ? (item.show?.ids ?? {}) : (item.movie?.ids ?? {}),
                   episodeIds: isEpisode ? (item.episode?.ids ?? {}) : undefined,
-                  releasedAt: isEpisode ? metadata?.releasedAt : item.movie?.released,
+                  releasedAt: isEpisode
+                    ? (metadata?.releasedAt ?? fallbackEpisodeReleasedAt)
+                    : item.movie?.released,
                   watchedAt: item.watched_at,
                   timeBadge: formatTimeAgo(item.watched_at),
                   timeBadgeTooltip: formatExactDate(item.watched_at),

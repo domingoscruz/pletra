@@ -352,7 +352,12 @@ export default async function ShowPage({ params }: Props) {
               )}
 
               <div className="flex flex-wrap items-center gap-2">
-                <RatingInput mediaType="shows" ids={show.ids ?? {}} currentRating={userRating} />
+                <RatingInput
+                  mediaType="shows"
+                  ids={show.ids ?? {}}
+                  currentRating={userRating}
+                  icon="heart"
+                />
                 {isAuthenticated && showProgress && (
                   <WatchStatus
                     mediaType="episodes"

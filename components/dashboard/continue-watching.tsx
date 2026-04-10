@@ -173,18 +173,18 @@ async function getCachedContinueWatchingItems(userKey: string) {
 
               exactAiredMap.set(slug, total);
 
-              const episodesPerSeason: Record<number, number> = {};
+              const totalEpisodesPerSeason: Record<number, number> = {};
               let maxS = 0;
 
               seasonsData.forEach((s) => {
                 const seasonNumber = s.number ?? 0;
                 if (seasonNumber > 0) {
-                  episodesPerSeason[seasonNumber] = s.aired_episodes || 0;
+                  totalEpisodesPerSeason[seasonNumber] = s.total_episodes || s.aired_episodes || 0;
                   if (seasonNumber > maxS) maxS = seasonNumber;
                 }
               });
 
-              seasonEpisodesMap.set(slug, episodesPerSeason);
+              seasonEpisodesMap.set(slug, totalEpisodesPerSeason);
               maxSeasonMap.set(slug, maxS);
             });
 

@@ -52,6 +52,24 @@ export const TRAKT_RATINGS: Record<number, string> = {
   10: "10/10 Totally Ninja!",
 };
 
+const RIBBON_COLORS: Record<number, string> = {
+  10: "#ed1c24",
+  9: "#df252e",
+  8: "#d22f37",
+  7: "#c43841",
+  6: "#b6424a",
+  5: "#a84b54",
+  4: "#9a555d",
+  3: "#8d5e67",
+  2: "#7f6870",
+  1: "#71717a",
+};
+
+const getRibbonColor = (rating?: number) => {
+  if (!rating || rating <= 0) return undefined;
+  return RIBBON_COLORS[Math.floor(rating)] || "#3f3f46";
+};
+
 export interface SyncPayload {
   type: "movies" | "shows" | "episodes";
   ids: Record<string, any>;
@@ -184,6 +202,7 @@ export function CardActions({
 
   const targetIds = episodeIds ? episodeIds : ids;
   const traktId = targetIds?.trakt ? Number(targetIds.trakt) : null;
+  const activeRatingColor = getRibbonColor(localRating);
 
   const months = [
     "January",
@@ -1111,20 +1130,29 @@ export function CardActions({
           setShowListOptions(false);
         }}
         className={cn(
-          "flex h-8 shrink-0 items-center justify-center gap-1.5 px-3 transition-colors hover:bg-zinc-800/80 rounded-br-lg",
-          localRating ? "text-red-600" : "text-zinc-500 hover:text-red-400",
+          "flex h-8 shrink-0 items-center justify-center px-3 transition-colors hover:bg-zinc-800/80 rounded-br-lg",
+          localRating ? "" : "text-zinc-500 hover:text-red-400",
         )}
       >
-        <svg
-          className="h-4 w-4"
-          fill={localRating ? "currentColor" : "none"}
-          stroke="currentColor"
-          strokeWidth={localRating ? 0 : 2.5}
-          viewBox="0 0 24 24"
-        >
-          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-        </svg>
-        <span className="text-[11px] font-bold text-white tabular-nums">{globalRating ?? 0}%</span>
+        <span className={cn("inline-flex h-4 items-center", localRating ? "gap-0.5" : "gap-1")}>
+          <span
+            className="flex h-4 w-4 shrink-0 items-center justify-center"
+            style={activeRatingColor ? { color: activeRatingColor } : undefined}
+          >
+            <svg
+              className="h-4 w-4"
+              fill={localRating ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth={localRating ? 0 : activeRatingColor ? 2.25 : 2.5}
+              viewBox="0 0 24 24"
+            >
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+            </svg>
+          </span>
+          <span className="flex h-4 items-center text-[11px] font-bold leading-none text-white tabular-nums">
+            {globalRating ?? 0}%
+          </span>
+        </span>
       </button>
     </div>
   );

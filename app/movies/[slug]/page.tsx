@@ -192,7 +192,12 @@ export default async function MoviePage({ params }: Props) {
               )}
 
               <div className="flex flex-wrap items-center gap-2">
-                <RatingInput mediaType="movies" ids={movie.ids ?? {}} currentRating={userRating} />
+                <RatingInput
+                  mediaType="movies"
+                  ids={movie.ids ?? {}}
+                  currentRating={userRating}
+                  icon="heart"
+                />
                 {isAuthenticated && (
                   <WatchStatus
                     mediaType="movies"

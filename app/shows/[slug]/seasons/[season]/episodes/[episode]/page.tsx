@@ -164,7 +164,15 @@ export default async function EpisodePage({ params }: Props) {
     }
   }
 
-  if (showRes.status !== 200 || episodeRes.status !== 200) {
+  type SeasonEp = EpisodeSummary & { number?: number; title?: string };
+  const seasonEpisodes =
+    seasonEpisodesRes.status === 200 ? (seasonEpisodesRes.body as SeasonEp[]) : [];
+  const fallbackEpisode =
+    episodeRes.status === 200
+      ? null
+      : (seasonEpisodes.find((item) => item.number === episodeNumber) ?? null);
+
+  if (showRes.status !== 200 || (episodeRes.status !== 200 && !fallbackEpisode)) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-muted">
         Episode not found.
@@ -173,12 +181,12 @@ export default async function EpisodePage({ params }: Props) {
   }
 
   const show = showRes.body as unknown as ShowSummary;
-  const episode = episodeRes.body as unknown as EpisodeSummary;
+  const episode =
+    episodeRes.status === 200
+      ? (episodeRes.body as unknown as EpisodeSummary)
+      : (fallbackEpisode as EpisodeSummary);
 
   // Determine prev/next episodes
-  type SeasonEp = { number?: number; title?: string };
-  const seasonEpisodes =
-    seasonEpisodesRes.status === 200 ? (seasonEpisodesRes.body as SeasonEp[]) : [];
   const currentIdx = seasonEpisodes.findIndex((e) => e.number === episodeNumber);
   const prevEp = currentIdx > 0 ? seasonEpisodes[currentIdx - 1] : null;
   const nextEp = currentIdx < seasonEpisodes.length - 1 ? seasonEpisodes[currentIdx + 1] : null;
@@ -419,6 +427,7 @@ export default async function EpisodePage({ params }: Props) {
                   mediaType="episodes"
                   ids={episode.ids ?? {}}
                   currentRating={userRating}
+                  icon="heart"
                 />
                 {isAuthenticated && (
                   <WatchStatus

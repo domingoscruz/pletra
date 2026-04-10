@@ -12,6 +12,7 @@ interface TraktEpisodeSummary {
 interface TraktSeasonSummary {
   number?: number | null;
   aired_episodes?: number | null;
+  episode_count?: number | null;
   episodes?: TraktEpisodeSummary[] | null;
 }
 
@@ -35,6 +36,9 @@ export async function getCachedShowSeasonCounts(slug: string) {
             return (res.body as TraktSeasonSummary[]).map((season) => ({
               number: season.number ?? null,
               aired_episodes: season.aired_episodes ?? null,
+              total_episodes:
+                season.episode_count ??
+                (Array.isArray(season.episodes) ? season.episodes.length : null),
             }));
           } catch (error) {
             if (!isTraktExpectedError(error)) {
