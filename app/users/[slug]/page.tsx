@@ -18,6 +18,7 @@ type FavItem = {
     title?: string;
     year?: number;
     rating?: number;
+    runtime?: number;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   show?: {
