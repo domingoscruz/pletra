@@ -9,6 +9,7 @@ interface Props {
     type?: string;
     page?: string;
     sort?: string;
+    day?: string;
     q?: string;
   }>;
 }
@@ -48,6 +49,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   const type = (sp.type as "all" | "movies" | "shows") || "all";
   const page = parseInt(sp.page ?? "1", 10);
   const sortBy = sp.sort ?? "newest";
+  const dayFilter = sp.day ?? "";
   const searchQuery = sp.q ?? "";
   const limit = 42;
   let items: HistoryItem[] = [];
@@ -159,6 +161,10 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     });
   }
 
+  if (dayFilter) {
+    items = items.filter((i) => i.watched_at?.slice(0, 10) === dayFilter);
+  }
+
   // Server-side sort
   items.sort((a, b) => {
     switch (sortBy) {
@@ -225,6 +231,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       currentPage={page}
       totalPages={totalPages}
       totalItems={totalItems}
+      activeDay={dayFilter}
       activeSort={sortBy}
       activeSearch={searchQuery}
     />

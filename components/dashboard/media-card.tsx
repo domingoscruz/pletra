@@ -41,6 +41,7 @@ export const SPECIAL_TAG_COLORS: Record<string, string> = {
 export interface MediaCardProps {
   title: string;
   subtitle?: string | React.ReactNode;
+  meta?: string | React.ReactNode;
   href: string;
   showHref?: string;
   backdropUrl: string | null;
@@ -97,6 +98,7 @@ export const getRibbonColor = (val: number): string => {
 export function MediaCard({
   title,
   subtitle,
+  meta,
   href,
   showHref,
   backdropUrl,
@@ -443,11 +445,14 @@ export function MediaCard({
         </div>
       )}
 
-      {(title || subtitle) && (
+      {(title || subtitle || meta) && (
         <div className="mt-2.5 flex w-full flex-col items-center px-1 pb-1 text-center">
           <Link
             href={href}
-            className="block w-full truncate text-[13px] font-bold leading-tight text-white transition-colors hover:text-red-500"
+            className={cn(
+              "block w-full truncate font-bold leading-tight text-white transition-colors hover:text-red-500",
+              isPoster ? "text-[13px]" : "text-[15px]",
+            )}
           >
             {mediaType !== "movies" ? subtitle : title}
           </Link>
@@ -455,7 +460,10 @@ export function MediaCard({
             <div className="relative mt-1 flex w-full items-center justify-center gap-1.5">
               <Link
                 href={showHref}
-                className="block max-w-full truncate text-[11px] font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline"
+                className={cn(
+                  "block max-w-full truncate font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline",
+                  isPoster ? "text-[11px]" : "text-[13px]",
+                )}
               >
                 {title}
               </Link>
@@ -505,10 +513,25 @@ export function MediaCard({
               )}
             </div>
           ) : (
-            <p className="mt-1 w-full truncate text-[11px] font-medium leading-tight text-zinc-400">
+            <p
+              className={cn(
+                "mt-1 w-full truncate font-medium leading-tight text-zinc-400",
+                isPoster ? "text-[11px]" : "text-[13px]",
+              )}
+            >
               {mediaType !== "movies" ? title : subtitle}
             </p>
           )}
+          {meta ? (
+            <p
+              className={cn(
+                "mt-1 w-full truncate font-medium leading-tight text-zinc-500",
+                isPoster ? "text-[11px]" : "text-[13px]",
+              )}
+            >
+              {meta}
+            </p>
+          ) : null}
         </div>
       )}
 

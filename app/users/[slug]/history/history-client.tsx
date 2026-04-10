@@ -34,6 +34,7 @@ interface HistoryClientProps {
   currentPage: number;
   totalPages: number;
   totalItems: number;
+  activeDay: string;
   activeSort: string;
   activeSearch: string;
 }
@@ -58,6 +59,7 @@ export function HistoryClient({
   currentPage,
   totalPages,
   activeSort,
+  activeDay,
   activeSearch,
 }: HistoryClientProps) {
   const { navigate: nav, isPending } = useNavigate();
@@ -67,22 +69,24 @@ export function HistoryClient({
   const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const navigate = useCallback(
-    (overrides: { type?: string; page?: number; sort?: string; q?: string }) => {
+    (overrides: { type?: string; page?: number; sort?: string; q?: string; day?: string }) => {
       const p = new URLSearchParams();
       const t = overrides.type ?? currentType;
       const pg = overrides.page ?? 1;
       const s = overrides.sort ?? activeSort;
+      const d = overrides.day ?? activeDay;
       const q = overrides.q ?? activeSearch;
 
       if (t !== "all") p.set("type", t);
       if (pg > 1) p.set("page", String(pg));
       if (s !== "newest") p.set("sort", s);
+      if (d) p.set("day", d);
       if (q) p.set("q", q);
 
       const qs = p.toString();
       nav(`/users/${slug}/history${qs ? `?${qs}` : ""}`);
     },
-    [nav, slug, currentType, activeSort, activeSearch],
+    [nav, slug, currentType, activeSort, activeDay, activeSearch],
   );
 
   function handleSearchChange(value: string) {
@@ -131,7 +135,9 @@ export function HistoryClient({
           {typeFilters.map((f) => (
             <button
               key={f.value}
-              onClick={() => navigate({ type: f.value, page: 1, sort: "newest", q: "" })}
+              onClick={() =>
+                navigate({ type: f.value, page: 1, sort: "newest", q: "", day: activeDay })
+              }
               className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 currentType === f.value
                   ? "bg-white/10 text-white"

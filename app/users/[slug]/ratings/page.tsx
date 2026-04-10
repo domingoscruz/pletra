@@ -11,6 +11,7 @@ interface Props {
     genre?: string;
     runtime?: string;
     sort?: string;
+    rating?: string;
     q?: string;
   }>;
 }
@@ -53,6 +54,7 @@ export default async function RatingsPage({ params, searchParams }: Props) {
   const page = parseInt(sp.page ?? "1", 10);
   const genreFilter = sp.genre ?? "";
   const runtimeFilter = sp.runtime ?? "";
+  const ratingFilter = sp.rating ?? "";
   const sortBy = sp.sort ?? "rating-desc";
   const searchQuery = sp.q ?? "";
   let allItems: RatedItem[] = [];
@@ -146,6 +148,13 @@ export default async function RatingsPage({ params, searchParams }: Props) {
     });
   }
 
+  if (ratingFilter) {
+    const exactRating = parseInt(ratingFilter, 10);
+    if (!Number.isNaN(exactRating) && exactRating >= 1 && exactRating <= 10) {
+      filteredItems = filteredItems.filter((i) => i.rating === exactRating);
+    }
+  }
+
   // Sort
   filteredItems.sort((a, b) => {
     switch (sortBy) {
@@ -236,6 +245,7 @@ export default async function RatingsPage({ params, searchParams }: Props) {
       allGenres={allGenres}
       activeGenre={genreFilter}
       activeRuntime={runtimeFilter}
+      activeRating={ratingFilter}
       activeSort={sortBy}
       activeSearch={searchQuery}
     />

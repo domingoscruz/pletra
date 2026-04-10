@@ -9,6 +9,7 @@ import { MediaCard } from "@/components/dashboard/media-card";
 import { RatingInput } from "@/components/media/rating-input";
 import { useSettings } from "@/lib/settings";
 import { useNavigate } from "@/lib/use-navigate";
+import { RatingsSummaryChart } from "../ratings-summary-chart";
 
 type RatingEntry = {
   id: number;
@@ -40,6 +41,7 @@ interface RatingsClientProps {
   allGenres: string[];
   activeGenre: string;
   activeRuntime: string;
+  activeRating: string;
   activeSort: string;
   activeSearch: string;
 }
@@ -69,6 +71,19 @@ const runtimeFilters = [
   { value: "180-999", label: "3h+" },
 ];
 
+const RATING_LABELS = [
+  "Weak sauce :(",
+  "Terrible",
+  "Bad",
+  "Poor",
+  "Meh",
+  "Fair",
+  "Good",
+  "Great",
+  "Superb",
+  "Totally Ninja!",
+];
+
 export function RatingsClient({
   items,
   slug,
@@ -81,6 +96,7 @@ export function RatingsClient({
   allGenres,
   activeGenre,
   activeRuntime,
+  activeRating,
   activeSort,
   activeSearch,
 }: RatingsClientProps) {
@@ -96,6 +112,7 @@ export function RatingsClient({
       page?: number;
       genre?: string;
       runtime?: string;
+      rating?: string;
       sort?: string;
       q?: string;
     }) => {
@@ -104,6 +121,7 @@ export function RatingsClient({
       const pg = overrides.page ?? 1;
       const g = overrides.genre ?? activeGenre;
       const r = overrides.runtime ?? activeRuntime;
+      const rt = overrides.rating ?? activeRating;
       const s = overrides.sort ?? activeSort;
       const q = overrides.q ?? activeSearch;
 
@@ -111,13 +129,14 @@ export function RatingsClient({
       if (pg > 1) p.set("page", String(pg));
       if (g) p.set("genre", g);
       if (r) p.set("runtime", r);
+      if (rt) p.set("rating", rt);
       if (s !== "rating-desc") p.set("sort", s);
       if (q) p.set("q", q);
 
       const qs = p.toString();
       nav(`/users/${slug}/ratings${qs ? `?${qs}` : ""}`);
     },
-    [nav, slug, currentType, activeGenre, activeRuntime, activeSort, activeSearch],
+    [nav, slug, currentType, activeGenre, activeRuntime, activeRating, activeSort, activeSearch],
   );
 
   function handleSearchChange(value: string) {
@@ -129,41 +148,28 @@ export function RatingsClient({
     }, 400);
   }
 
-  const maxCount = Math.max(...distribution);
-  const isFiltered = activeGenre || activeRuntime || activeSearch;
+  const isFiltered = activeGenre || activeRuntime || activeRating || activeSearch;
+  const distributionForChart = distribution.slice(1);
+  const average =
+    totalItems > 0
+      ? distributionForChart.reduce((sum, count, index) => sum + count * (index + 1), 0) /
+        totalItems
+      : 0;
 
   return (
     <div className={`space-y-6 ${isPending ? "opacity-60 transition-opacity" : ""}`}>
       {/* Rating distribution chart */}
-      <div className="rounded-xl bg-white/[0.02] p-4 ring-1 ring-white/5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-xs font-medium text-zinc-400">Rating Distribution</span>
-          <span className="text-xs text-zinc-600">{totalItems} total</span>
-        </div>
-        <div className="flex items-end gap-1.5" style={{ height: 64 }}>
-          {distribution.slice(1).map((count, i) => {
-            const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-            return (
-              <div key={i} className="group relative flex-1" style={{ height: "100%" }}>
-                <div
-                  className="absolute bottom-0 w-full rounded-t bg-white/10 transition-colors hover:bg-white/20"
-                  style={{ height: `${Math.max(height, 4)}%` }}
-                />
-                <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] tabular-nums text-zinc-500 opacity-0 transition-opacity group-hover:opacity-100">
-                  {count}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-1 flex gap-1.5">
-          {Array.from({ length: 10 }, (_, i) => (
-            <span key={i} className="flex-1 text-center text-[9px] tabular-nums text-zinc-600">
-              {i + 1}
-            </span>
-          ))}
-        </div>
-      </div>
+      <RatingsSummaryChart
+        slug={slug}
+        totalRatings={totalItems}
+        average={average}
+        distribution={distributionForChart}
+        labels={RATING_LABELS}
+        title="Ratings Distribution"
+        showIcon={false}
+        subtitleAlign="right"
+        fullWidth
+      />
 
       {/* Controls row 1 */}
       <div className="flex flex-wrap items-center gap-3">
@@ -171,7 +177,9 @@ export function RatingsClient({
           {typeFilters.map((f) => (
             <button
               key={f.value}
-              onClick={() => navigate({ type: f.value, page: 1, genre: "", runtime: "", q: "" })}
+              onClick={() =>
+                navigate({ type: f.value, page: 1, genre: "", runtime: "", rating: "", q: "" })
+              }
               className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 currentType === f.value
                   ? "bg-white/10 text-white"
@@ -240,6 +248,7 @@ export function RatingsClient({
         {isFiltered && (
           <p className="text-[11px] text-zinc-600">
             {filteredCount} of {totalItems} items
+            {activeRating ? ` · rating ${activeRating}` : ""}
           </p>
         )}
       </div>
