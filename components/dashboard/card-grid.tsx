@@ -26,9 +26,7 @@ export function CardGrid({
   containerClass,
   headerAction,
 }: CardGridProps) {
-  const normalizedChildren = Children.toArray(children).filter(
-    (child) => child !== null && child !== false,
-  );
+  const normalizedChildren = Children.toArray(children);
   const [columns, setColumns] = useState(rowSize);
   const [page, setPage] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
