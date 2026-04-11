@@ -3,7 +3,7 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
-import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { StartWatchingFilter } from "./start-watching-filter";
 
 const START_WATCHING_CACHE_TTL_MS = 30_000;
@@ -304,13 +304,12 @@ export async function getStartWatchingSectionPayload(): Promise<StartWatchingSec
       movieItems: deterministicShuffle(movieItems, `${userKey}:movies:${rotationBucket}`),
     };
   } catch (error) {
-    if (!isTraktExpectedError(error)) {
-      console.error("[Pletra] Start Watching Payload Error:", error);
-    }
+    const expected = isTraktExpectedError(error);
+    console[expected ? "warn" : "error"]("[Pletra] Start Watching Payload Error:", error);
 
     return {
       status: "error",
-      message: "Error fetching data from Trakt.",
+      message: getTraktErrorMessage(error),
     };
   }
 }

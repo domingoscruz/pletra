@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
@@ -80,6 +80,13 @@ const typeFilters = [
 
 const manageStorageKey = (slug: string, listSlug: string) =>
   `pletra-list-manage-${slug}-${listSlug}`;
+
+function createTransparentDragImage() {
+  const pixel = document.createElement("canvas");
+  pixel.width = 1;
+  pixel.height = 1;
+  return pixel;
+}
 
 function matchesTypeFilter(item: ListEntry, filter: string) {
   if (filter === "all") return true;
@@ -272,6 +279,8 @@ export function ListDetailClient({
   const [managedItems, setManagedItems] = useState(items);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const dragPreviewRef = useRef<HTMLElement | null>(null);
+  const transparentDragImageRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     setManagedItems(items);
@@ -285,11 +294,15 @@ export function ListDetailClient({
       const ordered = JSON.parse(raw) as number[];
       setManagedItems((current) => {
         const byId = new Map(current.map((item) => [item.id, item]));
+        const orderedIndex = new Map(ordered.map((id, index) => [id, index]));
         const orderedItems = ordered
           .map((id) => byId.get(id))
           .filter((item): item is ListEntry => Boolean(item));
         const remaining = current.filter((item) => !ordered.includes(item.id));
-        return [...orderedItems, ...remaining].map((item, index) => ({ ...item, rank: index + 1 }));
+        return [...orderedItems, ...remaining].map((item, index) => ({
+          ...item,
+          rank: orderedIndex.get(item.id) ?? item.rank ?? index + 1,
+        }));
       });
     } catch {
       return;
@@ -303,6 +316,13 @@ export function ListDetailClient({
       JSON.stringify(managedItems.map((item) => item.id)),
     );
   }, [isOwner, listSlug, manageMode, managedItems, slug]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!transparentDragImageRef.current) {
+      transparentDragImageRef.current = createTransparentDragImage();
+    }
+  }, []);
 
   const filtered = useMemo(() => {
     let result = managedItems;
@@ -323,6 +343,13 @@ export function ListDetailClient({
     return result;
   }, [genreFilter, managedItems, search, typeFilter]);
 
+  function isVisibleItem(item: ListEntry) {
+    if (typeFilter !== "all" && !matchesTypeFilter(item, typeFilter)) return false;
+    if (genreFilter && !item.genres.includes(genreFilter)) return false;
+    if (search && !item.title.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }
+
   function navigateWithFilters(sort: string, order: string, page: number, genres?: string) {
     const params = new URLSearchParams();
     if (sort !== "rank") params.set("sort", sort);
@@ -339,22 +366,84 @@ export function ListDetailClient({
 
   function updateRank(itemId: number, nextRank: number) {
     setManagedItems((current) => {
-      const normalized = Math.max(1, Math.min(current.length, nextRank));
-      const index = current.findIndex((item) => item.id === itemId);
+      const visiblePositions = current
+        .map((item, index) => (isVisibleItem(item) ? index : -1))
+        .filter((index) => index >= 0);
+      const visibleItems = visiblePositions.map((index) => current[index]);
+      const index = visibleItems.findIndex((item) => item.id === itemId);
       if (index === -1) return current;
-      const reordered = [...current];
-      const [moved] = reordered.splice(index, 1);
-      reordered.splice(normalized - 1, 0, moved);
-      return reordered.map((item, orderIndex) => ({ ...item, rank: orderIndex + 1 }));
+
+      const targetIndex = visibleItems.findIndex((item) => item.rank >= nextRank);
+      const normalizedIndex =
+        targetIndex === -1 ? visibleItems.length - 1 : Math.max(0, targetIndex);
+
+      const reorderedVisible = [...visibleItems];
+      const [moved] = reorderedVisible.splice(index, 1);
+      reorderedVisible.splice(normalizedIndex, 0, moved);
+
+      const next = [...current];
+      visiblePositions.forEach((position, visibleIndex) => {
+        next[position] = { ...reorderedVisible[visibleIndex], rank: position + 1 };
+      });
+
+      return next.map((item, orderIndex) => ({ ...item, rank: orderIndex + 1 }));
     });
   }
 
-  function beginDrag(event: React.DragEvent<HTMLDivElement>, itemId: number) {
+  function beginDrag(event: React.DragEvent<HTMLDivElement>, item: ListEntry) {
     if (!manageMode || !isOwner) return;
+    const sourceCard = event.currentTarget.closest("[data-drag-card='true']");
+    if (sourceCard instanceof HTMLElement) {
+      const preview = sourceCard.cloneNode(true) as HTMLElement;
+      const rect = sourceCard.getBoundingClientRect();
+      preview.style.position = "fixed";
+      preview.style.left = "0";
+      preview.style.top = "0";
+      preview.style.width = `${Math.round(rect.width)}px`;
+      preview.style.pointerEvents = "none";
+      preview.style.zIndex = "2000";
+      preview.style.margin = "0";
+      preview.style.transform = `translate(${event.clientX - rect.width / 2}px, ${event.clientY - rect.height / 2}px)`;
+      preview.style.opacity = "0.95";
+      preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
+      preview.style.rotate = "-2deg";
+      preview.setAttribute("aria-hidden", "true");
+      document.body.appendChild(preview);
+      dragPreviewRef.current = preview;
+    }
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(itemId));
-    setDraggedId(itemId);
+    event.dataTransfer.setData("text/plain", String(item.id));
+    if (transparentDragImageRef.current) {
+      event.dataTransfer.setDragImage(transparentDragImageRef.current, 0, 0);
+    }
+    setDraggedId(item.id);
   }
+
+  function moveDragPreview(clientX: number, clientY: number) {
+    const preview = dragPreviewRef.current;
+    if (!preview) return;
+    const width = preview.offsetWidth;
+    const height = preview.offsetHeight;
+    preview.style.transform = `translate(${clientX - width / 2}px, ${clientY - height / 2}px)`;
+  }
+
+  function finishDrag() {
+    setDraggedId(null);
+    setDragOverId(null);
+    dragPreviewRef.current?.remove();
+    dragPreviewRef.current = null;
+  }
+
+  useEffect(() => {
+    if (!draggedId) return;
+
+    const handleDragOver = (event: DragEvent) => {
+      moveDragPreview(event.clientX, event.clientY);
+    };
+
+    document.addEventListener("dragover", handleDragOver);
+    return () => document.removeEventListener("dragover", handleDragOver);
+  }, [draggedId]);
 
   function handleDrop(targetRank: number) {
     if (!manageMode || !isOwner || draggedId == null) return;
@@ -597,6 +686,7 @@ export function ListDetailClient({
             {filtered.map((item, index) => (
               <div
                 key={`${item.id}-${index}`}
+                data-drag-card="true"
                 className={`group relative rounded-lg transition-all ${
                   manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
                 }`}
@@ -670,6 +760,7 @@ export function ListDetailClient({
                       variant="poster"
                       showInlineActions
                       disableHover={manageMode}
+                      squareBottom={true}
                     />
                   </div>
                 )}
@@ -677,11 +768,8 @@ export function ListDetailClient({
                 {manageMode && isOwner && (
                   <div
                     draggable
-                    onDragStart={(event) => beginDrag(event, item.id)}
-                    onDragEnd={() => {
-                      setDraggedId(null);
-                      setDragOverId(null);
-                    }}
+                    onDragStart={(event) => beginDrag(event, item)}
+                    onDragEnd={finishDrag}
                     className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
                     aria-label={`Drag ${item.title}`}
                     title={`Drag ${item.title}`}
@@ -698,6 +786,7 @@ export function ListDetailClient({
           {filtered.map((item, index) => (
             <div
               key={`${item.id}-${index}`}
+              data-drag-card="true"
               className={`group relative flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04] ${
                 manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
               }`}
@@ -779,11 +868,8 @@ export function ListDetailClient({
               {manageMode && isOwner && (
                 <div
                   draggable
-                  onDragStart={(event) => beginDrag(event, item.id)}
-                  onDragEnd={() => {
-                    setDraggedId(null);
-                    setDragOverId(null);
-                  }}
+                  onDragStart={(event) => beginDrag(event, item)}
+                  onDragEnd={finishDrag}
                   className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
                   aria-label={`Drag ${item.title}`}
                   title={`Drag ${item.title}`}

@@ -51,6 +51,10 @@ type WatchlistItem = {
   };
 };
 
+type RankedWatchlistItem = WatchlistItem & {
+  absoluteRank: number;
+};
+
 export default async function WatchlistPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -60,6 +64,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   const genreFilter = sp.genre ?? "";
   const searchQuery = sp.q ?? "";
   const limit = 100;
+  const shouldPreserveAbsoluteRanks = sortBy === "rank";
 
   let items: WatchlistItem[] = [];
   let totalItems = 0;
@@ -73,14 +78,14 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
       sort_how: sortHow,
       ...extra,
     };
-    if (genreFilter) q.genres = genreFilter;
+    if (genreFilter && !shouldPreserveAbsoluteRanks) q.genres = genreFilter;
     return q;
   };
 
   try {
     const client = createTraktClient();
 
-    if (type === "all") {
+    if (shouldPreserveAbsoluteRanks || type === "all") {
       let page = 1;
       let totalPages = 1;
       while (page <= totalPages) {
@@ -186,18 +191,32 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
     }
   }
 
-  // Server-side search filter
-  if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    items = items.filter((i) => {
-      const title = (i.movie?.title ?? i.show?.title ?? "").toLowerCase();
-      return title.includes(q);
-    });
+  let rankedItems: RankedWatchlistItem[] = items.map((item, index) => ({
+    ...item,
+    absoluteRank: index + 1,
+  }));
+
+  if (!shouldPreserveAbsoluteRanks) {
+    if (type !== "all") {
+      rankedItems = rankedItems.filter((item) => {
+        if (type === "movies") return Boolean(item.movie);
+        if (type === "shows") return Boolean(item.show);
+        return true;
+      });
+    }
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      rankedItems = rankedItems.filter((i) => {
+        const title = (i.movie?.title ?? i.show?.title ?? "").toLowerCase();
+        return title.includes(q);
+      });
+    }
   }
 
   // Collect genres for dropdown
   const genreSet = new Set<string>();
-  for (const item of items) {
+  for (const item of rankedItems) {
     for (const g of item.movie?.genres ?? item.show?.genres ?? []) {
       genreSet.add(g);
     }
@@ -206,7 +225,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
 
   // Fetch images
   const images = await Promise.all(
-    items.map((item) => {
+    rankedItems.map((item) => {
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
@@ -218,9 +237,9 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
     }),
   );
 
-  const serialized = items.map((item, i) => ({
+  const serialized = rankedItems.map((item, i) => ({
     id: item.id ?? item.rank ?? i,
-    rank: i + 1,
+    rank: item.absoluteRank,
     listedAt: item.listed_at ?? "",
     type: item.type ?? (item.movie ? "movie" : "show"),
     title: item.movie?.title ?? item.show?.title ?? "Unknown",
@@ -236,7 +255,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   }));
 
   const updatedAt =
-    items
+    rankedItems
       .map((item) => item.listed_at)
       .filter((value): value is string => Boolean(value))
       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
@@ -251,7 +270,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
       activeGenre={genreFilter}
       activeSearch={searchQuery}
       allGenres={allGenres}
-      totalItems={totalItems || items.length}
+      totalItems={totalItems || rankedItems.length}
       updatedAt={updatedAt}
       isOwner={isOwner}
     />

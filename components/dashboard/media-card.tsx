@@ -77,6 +77,7 @@ export interface MediaCardProps {
   isInWatchlist?: boolean;
   priority?: boolean;
   showNewBadge?: boolean;
+  squareBottom?: boolean;
   showTitleAction?: {
     type: "hide-calendar";
     traktId: number;
@@ -131,6 +132,7 @@ export function MediaCard({
   isInWatchlist = false,
   priority = false,
   showNewBadge = false,
+  squareBottom = false,
   showTitleAction,
 }: MediaCardProps) {
   const router = useRouter();
@@ -275,7 +277,7 @@ export function MediaCard({
 
   const ribbonColor = optimisticRating ? getRibbonColor(optimisticRating) : "transparent";
   const defaultPrimaryText =
-    mediaType !== "movies" && typeof subtitle === "string" ? subtitle : title;
+    mediaType !== "movies" ? (typeof subtitle === "string" ? subtitle : "") : title;
   const defaultSecondaryText =
     mediaType !== "movies"
       ? typeof title === "string"
@@ -313,7 +315,10 @@ export function MediaCard({
       <div className="relative">
         <Link
           href={href}
-          className="block overflow-hidden rounded-lg border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]"
+          className={cn(
+            "block overflow-hidden border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]",
+            squareBottom ? "rounded-t-lg rounded-b-none" : "rounded-lg",
+          )}
         >
           <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
             {isTopTag && (
@@ -468,7 +473,7 @@ export function MediaCard({
             title={resolvedPrimaryText}
             className={cn(
               "block w-full truncate font-bold leading-tight text-white transition-colors hover:text-red-500",
-              isPoster ? "text-[13px]" : "text-[15px]",
+              isPoster ? "text-[13px]" : "text-[13px]",
             )}
           >
             {resolvedPrimaryText}
@@ -480,7 +485,7 @@ export function MediaCard({
                 title={resolvedSecondaryText}
                 className={cn(
                   "block max-w-full truncate font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline",
-                  isPoster ? "text-[11px]" : "text-[13px]",
+                  isPoster ? "text-[11px]" : "text-[11px]",
                 )}
               >
                 {title}
@@ -536,7 +541,7 @@ export function MediaCard({
               className={cn(
                 "w-full truncate font-medium leading-tight text-zinc-400",
                 isPoster ? "mt-0.5" : "mt-1",
-                isPoster ? "text-[11px]" : "text-[13px]",
+                isPoster ? "text-[11px]" : "text-[11px]",
               )}
             >
               {resolvedSecondaryText}
@@ -547,7 +552,7 @@ export function MediaCard({
               className={cn(
                 "w-full truncate font-medium leading-tight text-zinc-500",
                 isPoster ? "mt-0.5" : "mt-1",
-                isPoster ? "text-[11px]" : "text-[13px]",
+                isPoster ? "text-[11px]" : "text-[11px]",
               )}
             >
               {meta}

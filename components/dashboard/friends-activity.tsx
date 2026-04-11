@@ -2,7 +2,7 @@ import { getAuthenticatedTraktClient } from "@/lib/trakt-server";
 import { createTraktClient } from "@/lib/trakt";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { measureAsync } from "@/lib/perf";
-import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { FriendsActivityGrid, type FriendsActivityGridItem } from "./friends-activity-grid";
 
 export interface FollowingUser {
@@ -185,7 +185,10 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
     );
 
     if (followingRes.status !== 200) {
-      return { status: "error", message: "Error fetching data from Trakt." };
+      return {
+        status: "error",
+        message: "Trakt denied access to your following list. Please reconnect your account.",
+      };
     }
 
     const FRIENDS_LIMIT = 100;
@@ -339,13 +342,12 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
 
     return { status: "ok", items };
   } catch (error) {
-    if (!isTraktExpectedError(error)) {
-      console.error("[Pletra] Friend Activity Payload Error:", error);
-    }
+    const expected = isTraktExpectedError(error);
+    console[expected ? "warn" : "error"]("[Pletra] Friend Activity Payload Error:", error);
 
     return {
       status: "error",
-      message: "Error fetching data from Trakt.",
+      message: getTraktErrorMessage(error),
     };
   }
 }

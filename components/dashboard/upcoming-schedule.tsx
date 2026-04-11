@@ -15,7 +15,7 @@ import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
 import { getResponseErrorDetails, requestWithPolicy } from "@/lib/api/http";
-import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { UpcomingScheduleGrid } from "./upcoming-schedule-grid";
 
 const UPCOMING_SCHEDULE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -296,13 +296,12 @@ export async function getUpcomingScheduleSectionPayload(): Promise<UpcomingSched
       })),
     };
   } catch (error) {
-    if (!isTraktExpectedError(error)) {
-      console.error("[Upcoming Schedule Payload Error]:", error);
-    }
+    const expected = isTraktExpectedError(error);
+    console[expected ? "warn" : "error"]("[Upcoming Schedule Payload Error]:", error);
 
     return {
       status: "error",
-      message: "Error fetching data from Trakt.",
+      message: getTraktErrorMessage(error),
     };
   }
 }

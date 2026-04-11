@@ -4,7 +4,7 @@ import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
 import { getCachedShowSeasonCounts } from "@/lib/trakt-cache";
-import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { ContinueWatchingGrid } from "./continue-watching-grid";
 
 export const dynamic = "force-dynamic";
@@ -330,13 +330,12 @@ export async function getContinueWatchingSectionPayload(): Promise<ContinueWatch
 
     return { status: "ok", items: items as any[] };
   } catch (error) {
-    if (!isTraktExpectedError(error)) {
-      console.error("[Pletra] Continue Watching Payload Error:", error);
-    }
+    const expected = isTraktExpectedError(error);
+    console[expected ? "warn" : "error"]("[Pletra] Continue Watching Payload Error:", error);
 
     return {
       status: "error",
-      message: "Error fetching data from Trakt.",
+      message: getTraktErrorMessage(error),
     };
   }
 }

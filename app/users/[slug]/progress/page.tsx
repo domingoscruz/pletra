@@ -738,7 +738,7 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
         )}
 
         <div className="relative z-10 mx-auto max-w-[112.5rem] px-0 pb-4 pt-1 md:pb-6 md:pt-2">
-          <div className="min-h-[calc(100dvh-3.25rem)] rounded-2xl bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
+          <div className="min-h-[calc(100dvh-3.25rem)] overflow-hidden rounded-2xl border border-white/8 bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
             <ProgressClient
               slug={slug}
               items={items}

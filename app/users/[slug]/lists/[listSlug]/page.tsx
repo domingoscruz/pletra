@@ -227,7 +227,7 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 
     return {
       id: item.id ?? item.rank ?? i,
-      rank: item.rank ?? i + 1,
+      rank: i + 1,
       listedAt: item.listed_at ?? "",
       notes: item.notes ?? null,
       type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),

@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect, type ReactNode } from "react";
+import { Children, useState, useCallback, useEffect, type ReactNode } from "react";
 import Link from "@/components/ui/link";
 import { cn } from "@/lib/utils";
 
 interface CardGridProps {
   title: string | ReactNode;
-  children: ReactNode[];
+  children: ReactNode;
   rowSize?: number;
   defaultRows?: number;
   gridClass?: string;
@@ -26,7 +26,9 @@ export function CardGrid({
   containerClass,
   headerAction,
 }: CardGridProps) {
-  const normalizedChildren = children.filter((child) => child !== null && child !== false);
+  const normalizedChildren = Children.toArray(children).filter(
+    (child) => child !== null && child !== false,
+  );
   const [columns, setColumns] = useState(rowSize);
   const [page, setPage] = useState(0);
   const [isMobile, setIsMobile] = useState(false);

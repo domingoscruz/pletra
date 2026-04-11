@@ -3,7 +3,7 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
 import { getCachedShowEpisodeMetadata } from "@/lib/trakt-cache";
-import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { RecentActivityGrid } from "./recent-activity-grid";
 
 export const dynamic = "force-dynamic";
@@ -294,13 +294,12 @@ export async function getRecentActivitySectionPayload(): Promise<RecentActivityS
 
     return { status: "ok", items: items as any[] };
   } catch (error) {
-    if (!isTraktExpectedError(error)) {
-      console.error("[Pletra] Recent Activity Payload Error:", error);
-    }
+    const expected = isTraktExpectedError(error);
+    console[expected ? "warn" : "error"]("[Pletra] Recent Activity Payload Error:", error);
 
     return {
       status: "error",
-      message: "Error fetching data from Trakt.",
+      message: getTraktErrorMessage(error),
     };
   }
 }
