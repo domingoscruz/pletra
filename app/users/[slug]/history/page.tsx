@@ -66,6 +66,192 @@ type ViewerEpisodeMetadata = {
   episodeRatingMap: Map<number, number>;
 };
 
+type Last30DaysSummary = {
+  totalWatchTime: string;
+  episodeCount: number;
+  movieCount: number;
+  days: Array<{
+    key: string;
+    label: string;
+    fullLabel: string;
+    value: number;
+    watchTime: string;
+    episodeCount: number;
+    movieCount: number;
+  }>;
+};
+
+function formatMinutesCompact(minutes: number) {
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${mins}m`);
+  return parts.join(" ");
+}
+
+function formatDayLabel(date: Date) {
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function getWeekRange(day: string) {
+  const anchor = new Date(`${day}T12:00:00.000Z`);
+  const start = new Date(anchor);
+  const dayOfWeek = anchor.getUTCDay();
+  const daysFromMonday = (dayOfWeek + 6) % 7;
+  start.setUTCDate(anchor.getUTCDate() - daysFromMonday);
+  start.setUTCHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  end.setUTCHours(23, 59, 59, 999);
+
+  return {
+    start_at: start.toISOString(),
+    end_at: end.toISOString(),
+  };
+}
+
+function getMonthRange(day: string) {
+  const anchor = new Date(`${day}T12:00:00.000Z`);
+  const start = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+  const end = new Date(
+    Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+  );
+
+  return {
+    start_at: start.toISOString(),
+    end_at: end.toISOString(),
+  };
+}
+
+async function getLast30DaysSummary(
+  slug: string,
+  anchorDay?: string,
+): Promise<Last30DaysSummary | null> {
+  try {
+    const client = createTraktClient();
+    const anchor = anchorDay ? new Date(`${anchorDay}T12:00:00.000Z`) : new Date();
+    anchor.setUTCHours(23, 59, 59, 999);
+    const lastThirtyStart = new Date(anchor);
+    lastThirtyStart.setUTCDate(anchor.getUTCDate() - 29);
+    lastThirtyStart.setUTCHours(0, 0, 0, 0);
+
+    const lastThirtyRange = {
+      start_at: lastThirtyStart.toISOString(),
+      end_at: anchor.toISOString(),
+    };
+    const monthRange = anchorDay ? getMonthRange(anchorDay) : lastThirtyRange;
+    const chartRange = anchorDay ? monthRange : lastThirtyRange;
+    const chartStart = new Date(chartRange.start_at);
+    const chartEnd = new Date(chartRange.end_at);
+
+    const [movieRes, showRes, monthMovieRes, monthShowRes] = await Promise.all([
+      client.users.history.movies({
+        params: { id: slug },
+        query: { page: 1, limit: 500, extended: "full", ...chartRange },
+      }),
+      client.users.history.shows({
+        params: { id: slug },
+        query: { page: 1, limit: 500, extended: "full", ...chartRange },
+      }),
+      client.users.history.movies({
+        params: { id: slug },
+        query: { page: 1, limit: 500, extended: "full", ...monthRange },
+      }),
+      client.users.history.shows({
+        params: { id: slug },
+        query: { page: 1, limit: 500, extended: "full", ...monthRange },
+      }),
+    ]);
+
+    const movieItems = movieRes.status === 200 ? (movieRes.body as HistoryItem[]) : [];
+    const episodeItems = showRes.status === 200 ? (showRes.body as HistoryItem[]) : [];
+    const monthMovieItems =
+      monthMovieRes.status === 200 ? (monthMovieRes.body as HistoryItem[]) : [];
+    const monthEpisodeItems =
+      monthShowRes.status === 200 ? (monthShowRes.body as HistoryItem[]) : [];
+
+    if (movieItems.length === 0 && episodeItems.length === 0) return null;
+
+    const dayBuckets = [];
+    for (
+      const date = new Date(chartStart);
+      date.getTime() <= chartEnd.getTime();
+      date.setUTCDate(date.getUTCDate() + 1)
+    ) {
+      const current = new Date(date);
+      dayBuckets.push({
+        key: current.toISOString().slice(0, 10),
+        label: String(current.getUTCDate()),
+        fullLabel: formatDayLabel(current),
+        count: 0,
+        minutes: 0,
+        episodeCount: 0,
+        movieCount: 0,
+      });
+    }
+    const bucketMap = new Map(dayBuckets.map((bucket) => [bucket.key, bucket]));
+
+    for (const item of movieItems) {
+      const key = item.watched_at?.slice(0, 10);
+      if (key) {
+        bucketMap.get(key)!.count += 1;
+        bucketMap.get(key)!.movieCount += 1;
+      }
+      const runtime = item.movie?.runtime ?? 0;
+      if (key) bucketMap.get(key)!.minutes += runtime;
+    }
+
+    for (const item of episodeItems) {
+      const key = item.watched_at?.slice(0, 10);
+      if (key) {
+        bucketMap.get(key)!.count += 1;
+        bucketMap.get(key)!.episodeCount += 1;
+      }
+      const runtime = item.episode?.runtime ?? 0;
+      if (key) bucketMap.get(key)!.minutes += runtime;
+    }
+
+    const monthMovieMinutes = monthMovieItems.reduce(
+      (sum, item) => sum + (item.movie?.runtime ?? 0),
+      0,
+    );
+    const monthEpisodeMinutes = monthEpisodeItems.reduce(
+      (sum, item) => sum + (item.episode?.runtime ?? 0),
+      0,
+    );
+
+    return {
+      totalWatchTime: formatMinutesCompact(monthMovieMinutes + monthEpisodeMinutes),
+      episodeCount: monthEpisodeItems.length,
+      movieCount: monthMovieItems.length,
+      days: dayBuckets.map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        fullLabel: bucket.fullLabel,
+        value: bucket.minutes,
+        watchTime: formatMinutesCompact(bucket.minutes),
+        episodeCount: bucket.episodeCount,
+        movieCount: bucket.movieCount,
+      })),
+    };
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[User History Page] Failed to load last 30 days:", error);
+    }
+    return null;
+  }
+}
+
 async function getViewerMovieMetadata(): Promise<ViewerMovieMetadata> {
   const client = await getOptionalTraktClient();
 
@@ -164,37 +350,64 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   let items: HistoryItem[] = [];
   let totalPages = 1;
   let totalItems = 0;
+  const dateRange = dayFilter ? getWeekRange(dayFilter) : {};
 
   try {
     if (type === "movies") {
-      const res = await client.users.history.movies({
-        params: { id: slug },
-        query: { page, limit, extended: "full" },
-      });
-      if (res.status === 200) {
-        items = res.body as HistoryItem[];
-        totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
-        totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+      if (dayFilter) {
+        const res = await client.users.history.movies({
+          params: { id: slug },
+          query: { page: 1, limit: 250, extended: "full", ...dateRange },
+        });
+        if (res.status === 200) {
+          items = res.body as HistoryItem[];
+          totalItems = items.length;
+        }
+      } else {
+        const res = await client.users.history.movies({
+          params: { id: slug },
+          query: { page, limit, extended: "full" },
+        });
+        if (res.status === 200) {
+          items = res.body as HistoryItem[];
+          totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
+          totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+        }
       }
     } else if (type === "shows") {
-      const res = await client.users.history.shows({
-        params: { id: slug },
-        query: { page, limit, extended: "full" },
-      });
-      if (res.status === 200) {
-        items = res.body as HistoryItem[];
-        totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
-        totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+      if (dayFilter) {
+        const res = await client.users.history.shows({
+          params: { id: slug },
+          query: { page: 1, limit: 250, extended: "full", ...dateRange },
+        });
+        if (res.status === 200) {
+          items = res.body as HistoryItem[];
+          totalItems = items.length;
+        }
+      } else {
+        const res = await client.users.history.shows({
+          params: { id: slug },
+          query: { page, limit, extended: "full" },
+        });
+        if (res.status === 200) {
+          items = res.body as HistoryItem[];
+          totalPages = parseInt(String(res.headers.get?.("x-pagination-page-count") ?? "1"), 10);
+          totalItems = parseInt(String(res.headers.get?.("x-pagination-item-count") ?? "0"), 10);
+        }
       }
     } else {
       const [movieRes, showRes] = await Promise.all([
         client.users.history.movies({
           params: { id: slug },
-          query: { page, limit: Math.ceil(limit / 2), extended: "full" },
+          query: dayFilter
+            ? { page: 1, limit: 250, extended: "full", ...dateRange }
+            : { page, limit: Math.ceil(limit / 2), extended: "full" },
         }),
         client.users.history.shows({
           params: { id: slug },
-          query: { page, limit: Math.ceil(limit / 2), extended: "full" },
+          query: dayFilter
+            ? { page: 1, limit: 250, extended: "full", ...dateRange }
+            : { page, limit: Math.ceil(limit / 2), extended: "full" },
         }),
       ]);
 
@@ -205,24 +418,28 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         (a, b) => new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
       );
 
-      const movieTotal = parseInt(
-        String(
-          (movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-            "x-pagination-page-count",
-          ) ?? "1",
-        ),
-        10,
-      );
-      const showTotal = parseInt(
-        String(
-          (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-            "x-pagination-page-count",
-          ) ?? "1",
-        ),
-        10,
-      );
-      totalPages = Math.max(movieTotal, showTotal);
-      totalItems = items.length;
+      if (dayFilter) {
+        totalItems = items.length;
+      } else {
+        const movieTotal = parseInt(
+          String(
+            (movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-page-count",
+            ) ?? "1",
+          ),
+          10,
+        );
+        const showTotal = parseInt(
+          String(
+            (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-page-count",
+            ) ?? "1",
+          ),
+          10,
+        );
+        totalPages = Math.max(movieTotal, showTotal);
+        totalItems = items.length;
+      }
     }
   } catch (error) {
     if (!isTraktExpectedError(error)) {
@@ -275,10 +492,6 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     });
   }
 
-  if (dayFilter) {
-    items = items.filter((i) => i.watched_at?.slice(0, 10) === dayFilter);
-  }
-
   items.sort((a, b) => {
     switch (sortBy) {
       case "oldest":
@@ -293,6 +506,9 @@ export default async function HistoryPage({ params, searchParams }: Props) {
           (b.movie?.rating ?? b.episode?.rating ?? 0) - (a.movie?.rating ?? a.episode?.rating ?? 0)
         );
       default:
+        if (dayFilter) {
+          return new Date(a.watched_at ?? 0).getTime() - new Date(b.watched_at ?? 0).getTime();
+        }
         return new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime();
     }
   });
@@ -360,6 +576,14 @@ export default async function HistoryPage({ params, searchParams }: Props) {
           : false,
   }));
 
+  const last30Days = await getLast30DaysSummary(slug, dayFilter || undefined);
+  const availableDayKeys = Array.from(
+    new Set([
+      ...serializedItems.map((item) => item.watched_at.slice(0, 10)).filter(Boolean),
+      ...(last30Days?.days.filter((day) => day.value > 0).map((day) => day.key) ?? []),
+    ]),
+  );
+
   return (
     <HistoryClient
       items={serializedItems}
@@ -371,6 +595,8 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       activeDay={dayFilter}
       activeSort={sortBy}
       activeSearch={searchQuery}
+      last30Days={last30Days}
+      availableDayKeys={availableDayKeys}
     />
   );
 }

@@ -104,9 +104,16 @@ interface ProgressClientProps {
   totalItems: number;
 }
 
+type PersonalListOption = {
+  name: string;
+  slug: string;
+  privacy: string;
+};
+
 type ActiveMenu = "checkin" | "rating" | "watchlist" | null;
 
 const DROP_CONFIRM_STORAGE_KEY = "pletra-progress-drop-confirm-disabled";
+let sharedPersonalListsPromise: Promise<PersonalListOption[]> | null = null;
 
 const formatDuration = (totalMinutes: number | undefined | null): string => {
   if (!totalMinutes || Number.isNaN(totalMinutes) || totalMinutes <= 0) return "0m";
@@ -118,6 +125,34 @@ const formatDuration = (totalMinutes: number | undefined | null): string => {
   if (hours > 0) parts.push(`${hours}h`);
   if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
   return parts.join(" ");
+};
+
+const fetchPersonalLists = () => {
+  if (!sharedPersonalListsPromise) {
+    sharedPersonalListsPromise = fetchTraktRouteJson<
+      Array<{ name?: string; privacy?: string; ids?: { slug?: string } }>
+    >("/api/trakt/users/me/lists", {
+      cache: "no-store",
+      timeoutMs: 10000,
+      maxRetries: 1,
+    })
+      .then((data) => data ?? [])
+      .then((data) =>
+        data
+          .map((item) => ({
+            name: item.name?.trim() || "Untitled List",
+            slug: item.ids?.slug?.trim() || "",
+            privacy: item.privacy ?? "private",
+          }))
+          .filter((item) => item.slug),
+      )
+      .catch(() => {
+        sharedPersonalListsPromise = null;
+        return [];
+      });
+  }
+
+  return sharedPersonalListsPromise;
 };
 
 const formatEpisodeCode = (season: number, episode: number) =>
@@ -1522,6 +1557,10 @@ const ProgressShowRow = memo(
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const [, setUserRating] = useState<number | undefined>(item.userRating);
     const [inWatchlist, setInWatchlist] = useState(false);
+    const [availableLists, setAvailableLists] = useState<PersonalListOption[]>([]);
+    const [selectedListSlugs, setSelectedListSlugs] = useState<string[]>([]);
+    const [listsLoading, setListsLoading] = useState(false);
+    const [listsError, setListsError] = useState<string | null>(null);
     const [showSeasonBreakdown, setShowSeasonBreakdown] = useState(false);
     const [isLoadingSeasons, setIsLoadingSeasons] = useState(false);
     const [expandedSeasons, setExpandedSeasons] = useState<number[]>([]);
@@ -1545,6 +1584,7 @@ const ProgressShowRow = memo(
     }, [initialItem]);
 
     const next = item.nextEpisode;
+    const listPayloadKey = "shows";
     const isPriority = index < 2;
     const seasonNumbers = useMemo(
       () => item.seasons.map((season) => season.season),
@@ -1594,6 +1634,28 @@ const ProgressShowRow = memo(
         isMounted = false;
       };
     }, [item.traktId]);
+
+    useEffect(() => {
+      if (activeMenu !== "watchlist") return;
+
+      setSelectedListSlugs([]);
+      setListsError(null);
+
+      if (availableLists.length > 0) return;
+
+      setListsLoading(true);
+      fetchPersonalLists()
+        .then((lists) => {
+          setAvailableLists(lists);
+          if (lists.length === 0) {
+            setListsError("No personal lists found.");
+          }
+        })
+        .catch(() => {
+          setListsError("Failed to load your lists.");
+        })
+        .finally(() => setListsLoading(false));
+    }, [activeMenu, availableLists.length]);
 
     useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
@@ -1875,6 +1937,53 @@ const ProgressShowRow = memo(
       event.preventDefault();
       event.stopPropagation();
       setActiveMenu((current) => (current === menu ? null : menu));
+    };
+
+    const toggleListSelection = (slug: string) => {
+      setSelectedListSlugs((current) =>
+        current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug],
+      );
+    };
+
+    const handleAddToSelectedLists = () => {
+      if (selectedListSlugs.length === 0) return;
+
+      startTransition(async () => {
+        let addedCount = 0;
+        let failedCount = 0;
+
+        for (const listSlug of selectedListSlugs) {
+          try {
+            await fetchTraktRouteJson(
+              `/api/trakt/users/me/lists/${encodeURIComponent(listSlug)}/items`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  [listPayloadKey]: [{ ids: { trakt: item.traktId } }],
+                }),
+                timeoutMs: 10000,
+              },
+            );
+            addedCount += 1;
+          } catch {
+            failedCount += 1;
+          }
+        }
+
+        if (addedCount > 0 && failedCount === 0) {
+          showToast(
+            addedCount === 1 ? "Added to 1 list!" : `Added to ${addedCount} lists!`,
+            "success",
+          );
+          setSelectedListSlugs([]);
+          setActiveMenu(null);
+        } else if (addedCount > 0) {
+          showToast(`Added to ${addedCount} lists, ${failedCount} failed.`, "success");
+        } else {
+          showToast("Failed to add to selected lists.", "error");
+        }
+      });
     };
 
     const runDropShow = async () => {
@@ -2250,7 +2359,7 @@ const ProgressShowRow = memo(
                 title={shouldManageHistory ? "Open history actions" : "Open watch actions"}
               >
                 <svg
-                  className="h-4 w-4"
+                  className="h-[1.45rem] w-[1.45rem]"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={4}
@@ -2277,7 +2386,7 @@ const ProgressShowRow = memo(
                 aria-label="Open watchlist actions"
                 title="Open watchlist actions"
               >
-                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                <svg className="h-[1.1rem] w-[1.1rem]" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z" />
                 </svg>
               </button>
@@ -2377,7 +2486,7 @@ const ProgressShowRow = memo(
         />
 
         <MenuWrapper triggerRef={triggerRef} isOpen={activeMenu === "watchlist"}>
-          <div className="w-64 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/10">
+          <div className="w-80 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/10">
             <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
               Watchlist
             </p>
@@ -2392,6 +2501,68 @@ const ProgressShowRow = memo(
             >
               {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
             </button>
+
+            <div className="mt-3 rounded-lg border border-white/8 bg-black/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  Add To Lists
+                </p>
+                <span className="text-[10px] text-zinc-600">
+                  {selectedListSlugs.length} selected
+                </span>
+              </div>
+
+              {listsLoading ? (
+                <p className="text-[11px] text-zinc-500">Loading your lists...</p>
+              ) : availableLists.length === 0 ? (
+                <p className="text-[11px] text-zinc-500">
+                  {listsError ?? "Create a personal list first."}
+                </p>
+              ) : (
+                <>
+                  <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                    {availableLists.map((list) => {
+                      const selected = selectedListSlugs.includes(list.slug);
+                      return (
+                        <label
+                          key={list.slug}
+                          className={cn(
+                            "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 transition-colors",
+                            selected
+                              ? "border-cyan-400/40 bg-cyan-500/10"
+                              : "border-white/8 bg-white/[0.03] hover:bg-white/[0.06]",
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleListSelection(list.slug)}
+                            className="mt-0.5 h-4 w-4 rounded border-white/15 bg-transparent text-cyan-400 focus:ring-cyan-400/30"
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-zinc-100">
+                              {list.name}
+                            </div>
+                            <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                              {list.privacy}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddToSelectedLists}
+                    disabled={selectedListSlugs.length === 0 || isPending}
+                    className="mt-3 w-full rounded-lg bg-cyan-500/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Add Selected Lists
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </MenuWrapper>
 
@@ -2572,7 +2743,7 @@ export function ProgressClient({
                 handleSearchSubmit();
               }
             }}
-            className="h-full w-full border border-white/5 bg-[#1a1a1a] px-5 text-sm text-zinc-200 outline-none transition-colors focus:border-purple-600"
+            className="h-full w-full rounded-xl border border-white/5 bg-[#1a1a1a] px-5 text-sm text-zinc-200 outline-none transition-colors focus:border-purple-600"
           />
           {isPending && (
             <div className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin rounded-full border-2 border-purple-600 border-t-transparent" />

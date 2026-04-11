@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 
 interface Last30DaysChartProps {
   slug: string;
+  activeDay?: string;
+  title?: string;
+  variant?: "profile" | "history";
   totalWatchTime: string;
   episodeCount: number;
   movieCount: number;
@@ -21,6 +24,9 @@ interface Last30DaysChartProps {
 
 export function Last30DaysChart({
   slug,
+  activeDay,
+  title = "Last 30 Days",
+  variant = "history",
   totalWatchTime,
   episodeCount,
   movieCount,
@@ -31,7 +37,9 @@ export function Last30DaysChart({
   const maxCount = Math.max(...days.map((day) => day.value), 1);
 
   return (
-    <section className="mx-auto max-w-[76rem] px-3 py-1 text-zinc-100 sm:px-0">
+    <section
+      className={`text-zinc-100 ${variant === "profile" ? "mx-auto w-full max-w-[76rem]" : "w-full"} px-3 py-1 sm:px-0`}
+    >
       <div className="mb-3">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5">
@@ -43,7 +51,7 @@ export function Last30DaysChart({
               </svg>
             </div>
             <h2 className="shrink-0 text-[12px] font-black uppercase tracking-wider text-zinc-200 sm:text-[14px]">
-              Last 30 Days
+              {title}
             </h2>
           </div>
 
@@ -51,7 +59,8 @@ export function Last30DaysChart({
         </div>
 
         <p className="mt-1 pl-[26px] text-[0.82rem] text-zinc-400 sm:text-[0.9rem]">
-          {totalWatchTime} watched — {episodeCount.toLocaleString()} episodes —{" "}
+          {activeDay ? "Month totals for the selected date: " : ""}
+          {totalWatchTime} watched - {episodeCount.toLocaleString()} episodes -{" "}
           {movieCount.toLocaleString()} movies
         </p>
       </div>
@@ -62,7 +71,7 @@ export function Last30DaysChart({
 
         <div className="grid h-36 grid-cols-30 items-end gap-px pl-1 pr-1">
           {days.map((day, index) => (
-            <div key={index} className="relative flex h-full flex-col justify-end">
+            <div key={day.key} className="relative flex h-full flex-col justify-end">
               <div className="pointer-events-none absolute bottom-[-4px] left-0 h-4 w-px bg-zinc-600/55" />
               {day.value > 0 ? (
                 <div
@@ -100,7 +109,11 @@ export function Last30DaysChart({
                   >
                     <div
                       className={`h-full w-full ${
-                        hoveredDay === index ? "bg-[#ac72cf]" : "bg-zinc-300/78"
+                        activeDay === day.key
+                          ? "bg-cyan-300"
+                          : hoveredDay === index
+                            ? "bg-[#ac72cf]"
+                            : "bg-zinc-300/78"
                       }`}
                     />
                   </button>
@@ -115,8 +128,8 @@ export function Last30DaysChart({
       </div>
 
       <div className="grid grid-cols-30 gap-px pt-1.5 text-center text-[0.68rem] text-zinc-500">
-        {days.map((day, index) => (
-          <span key={index}>{day.label}</span>
+        {days.map((day) => (
+          <span key={day.key}>{day.label}</span>
         ))}
       </div>
     </section>

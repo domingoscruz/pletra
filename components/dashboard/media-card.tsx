@@ -137,6 +137,8 @@ export function MediaCard({
 }: MediaCardProps) {
   const router = useRouter();
   const isPoster = variant === "poster";
+  const hasActionBar = !disableHover && showInlineActions;
+  const shouldSquareBottom = squareBottom || hasActionBar;
 
   const resolveImageUrl = (...urls: (string | null | undefined)[]): string | null => {
     for (const url of urls) {
@@ -317,7 +319,7 @@ export function MediaCard({
           href={href}
           className={cn(
             "block overflow-hidden border border-white/5 bg-zinc-900 transition-all hover:border-white/20 active:scale-[0.98]",
-            squareBottom ? "rounded-t-lg rounded-b-none" : "rounded-lg",
+            shouldSquareBottom ? "rounded-t-lg rounded-b-none" : "rounded-lg",
           )}
         >
           <div className={cn("relative", isPoster ? "aspect-[2/3]" : "aspect-[16/10]")}>
@@ -437,7 +439,7 @@ export function MediaCard({
       </div>
 
       {!disableHover && showInlineActions && (
-        <div className="relative z-30 w-full">
+        <div className="relative z-30 -mt-px w-full">
           <CardActions
             mediaType={mediaType}
             ids={ids}

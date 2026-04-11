@@ -6,6 +6,7 @@ import Link from "@/components/ui/link";
 import { ViewToggle } from "@/components/ui/view-toggle";
 import { Select } from "@/components/ui/select";
 import { MediaCard } from "@/components/dashboard/media-card";
+import { formatRuntime } from "@/lib/format";
 import { useSettings } from "@/lib/settings";
 import { useNavigate } from "@/lib/use-navigate";
 
@@ -25,6 +26,8 @@ type WatchlistEntry = {
   ids: Record<string, unknown>;
   genres: string[];
 };
+
+type WatchlistEntryKey = string;
 
 interface WatchlistClientProps {
   items: WatchlistEntry[];
@@ -59,11 +62,62 @@ const sortOptions = [
 
 const manageStorageKey = (slug: string) => `pletra-watchlist-manage-${slug}`;
 
+function shouldUseManagedOrder(isOwner: boolean, manageMode: boolean, activeSort: string) {
+  return isOwner && manageMode && activeSort === "rank";
+}
+
 function createTransparentDragImage() {
   const pixel = document.createElement("canvas");
   pixel.width = 1;
   pixel.height = 1;
   return pixel;
+}
+
+function createDragPreviewLabel(title: string, meta?: string) {
+  const preview = document.createElement("div");
+  preview.style.position = "fixed";
+  preview.style.left = "-9999px";
+  preview.style.top = "-9999px";
+  preview.style.pointerEvents = "none";
+  preview.style.zIndex = "9999";
+  preview.style.maxWidth = "220px";
+  preview.style.border = "1px solid rgba(255,255,255,0.12)";
+  preview.style.borderRadius = "14px";
+  preview.style.background = "rgba(10,10,10,0.96)";
+  preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
+  preview.style.padding = "12px 14px";
+  preview.style.color = "white";
+
+  const titleEl = document.createElement("div");
+  titleEl.style.fontSize = "12px";
+  titleEl.style.fontWeight = "700";
+  titleEl.style.lineHeight = "1.3";
+  titleEl.textContent = title;
+  preview.appendChild(titleEl);
+
+  if (meta) {
+    const metaEl = document.createElement("div");
+    metaEl.style.marginTop = "4px";
+    metaEl.style.fontSize = "10px";
+    metaEl.style.letterSpacing = "0.08em";
+    metaEl.style.textTransform = "uppercase";
+    metaEl.style.color = "rgba(161,161,170,1)";
+    metaEl.textContent = meta;
+    preview.appendChild(metaEl);
+  }
+
+  return preview;
+}
+
+function getItemMeta(item: WatchlistEntry) {
+  const parts: string[] = [];
+  if (item.year) parts.push(String(item.year));
+  if (item.type === "movie" && item.runtime) parts.push(formatRuntime(item.runtime));
+  return parts.join(" - ");
+}
+
+function getEntryKey(item: WatchlistEntry): WatchlistEntryKey {
+  return `${item.type}-${String(item.ids.trakt ?? item.href ?? item.id)}-${item.listedAt}`;
 }
 
 export function WatchlistClient({
@@ -86,8 +140,8 @@ export function WatchlistClient({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [manageMode, setManageMode] = useState(false);
   const [managedItems, setManagedItems] = useState(items);
-  const [draggedId, setDraggedId] = useState<number | null>(null);
-  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [draggedId, setDraggedId] = useState<WatchlistEntryKey | null>(null);
+  const [dragOverId, setDragOverId] = useState<WatchlistEntryKey | null>(null);
   const dragPreviewRef = useRef<HTMLElement | null>(null);
   const transparentDragImageRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -131,35 +185,34 @@ export function WatchlistClient({
   }, [items]);
 
   useEffect(() => {
-    if (!isOwner) return;
+    if (!isOwner || activeSort !== "rank") return;
     try {
       const raw = localStorage.getItem(manageStorageKey(slug));
       if (!raw) return;
-      const ordered = JSON.parse(raw) as number[];
+      const ordered = JSON.parse(raw) as string[];
       setManagedItems((current) => {
-        const byId = new Map(current.map((item) => [item.id, item]));
-        const orderedIndex = new Map(ordered.map((id, index) => [id, index]));
+        const byId = new Map(current.map((item) => [getEntryKey(item), item]));
         const orderedItems = ordered
           .map((id) => byId.get(id))
           .filter((item): item is WatchlistEntry => Boolean(item));
-        const remaining = current.filter((item) => !ordered.includes(item.id));
+        const remaining = current.filter((item) => !ordered.includes(getEntryKey(item)));
         return [...orderedItems, ...remaining].map((item, index) => ({
           ...item,
-          rank: orderedIndex.get(item.id) ?? item.rank ?? index + 1,
+          rank: index + 1,
         }));
       });
     } catch {
       return;
     }
-  }, [isOwner, slug]);
+  }, [activeSort, isOwner, slug]);
 
   useEffect(() => {
-    if (!isOwner || !manageMode) return;
+    if (!shouldUseManagedOrder(isOwner, manageMode, activeSort)) return;
     localStorage.setItem(
       manageStorageKey(slug),
-      JSON.stringify(managedItems.map((item) => item.id)),
+      JSON.stringify(managedItems.map((item) => getEntryKey(item))),
     );
-  }, [isOwner, manageMode, managedItems, slug]);
+  }, [activeSort, isOwner, manageMode, managedItems, slug]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -169,7 +222,7 @@ export function WatchlistClient({
   }, []);
 
   const filteredItems = useMemo(() => {
-    let result = managedItems;
+    let result = shouldUseManagedOrder(isOwner, manageMode, activeSort) ? managedItems : items;
 
     if (currentType === "movies") {
       result = result.filter((item) => item.type === "movie");
@@ -187,7 +240,16 @@ export function WatchlistClient({
     }
 
     return result;
-  }, [activeGenre, activeSearch, currentType, managedItems]);
+  }, [
+    activeGenre,
+    activeSearch,
+    activeSort,
+    currentType,
+    isOwner,
+    items,
+    manageMode,
+    managedItems,
+  ]);
 
   function isVisibleItem(item: WatchlistEntry) {
     if (currentType === "movies" && item.type !== "movie") return false;
@@ -198,22 +260,20 @@ export function WatchlistClient({
     return true;
   }
 
-  function updateRank(itemId: number, nextRank: number) {
+  function updateRank(itemId: WatchlistEntryKey, targetItemId: WatchlistEntryKey) {
     setManagedItems((current) => {
       const visiblePositions = current
         .map((item, index) => (isVisibleItem(item) ? index : -1))
         .filter((index) => index >= 0);
       const visibleItems = visiblePositions.map((index) => current[index]);
-      const fromIndex = visibleItems.findIndex((item) => item.id === itemId);
+      const fromIndex = visibleItems.findIndex((item) => getEntryKey(item) === itemId);
+      const toIndex = visibleItems.findIndex((item) => getEntryKey(item) === targetItemId);
       if (fromIndex === -1) return current;
-
-      const targetIndex = visibleItems.findIndex((item) => item.rank >= nextRank);
-      const normalizedIndex =
-        targetIndex === -1 ? visibleItems.length - 1 : Math.max(0, targetIndex);
+      if (toIndex === -1) return current;
 
       const reorderedVisible = [...visibleItems];
       const [moved] = reorderedVisible.splice(fromIndex, 1);
-      reorderedVisible.splice(normalizedIndex, 0, moved);
+      reorderedVisible.splice(toIndex, 0, moved);
 
       const next = [...current];
       visiblePositions.forEach((position, visibleIndex) => {
@@ -230,39 +290,19 @@ export function WatchlistClient({
 
   function beginDrag(event: React.DragEvent<HTMLDivElement>, item: WatchlistEntry) {
     if (!manageMode || !isOwner) return;
-    const sourceCard = event.currentTarget.closest("[data-drag-card='true']");
-    if (sourceCard instanceof HTMLElement) {
-      const preview = sourceCard.cloneNode(true) as HTMLElement;
-      const rect = sourceCard.getBoundingClientRect();
-      preview.style.position = "fixed";
-      preview.style.left = "0";
-      preview.style.top = "0";
-      preview.style.width = `${Math.round(rect.width)}px`;
-      preview.style.pointerEvents = "none";
-      preview.style.zIndex = "2000";
-      preview.style.margin = "0";
-      preview.style.transform = `translate(${event.clientX - rect.width / 2}px, ${event.clientY - rect.height / 2}px)`;
-      preview.style.opacity = "0.95";
-      preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
-      preview.style.rotate = "-2deg";
-      preview.setAttribute("aria-hidden", "true");
-      document.body.appendChild(preview);
-      dragPreviewRef.current = preview;
-    }
+    const entryKey = getEntryKey(item);
+    dragPreviewRef.current?.remove();
+    const preview = createDragPreviewLabel(item.title, getItemMeta(item));
+    document.body.appendChild(preview);
+    dragPreviewRef.current = preview;
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(item.id));
-    if (transparentDragImageRef.current) {
+    event.dataTransfer.setData("text/plain", entryKey);
+    if (dragPreviewRef.current) {
+      event.dataTransfer.setDragImage(dragPreviewRef.current, 110, 24);
+    } else if (transparentDragImageRef.current) {
       event.dataTransfer.setDragImage(transparentDragImageRef.current, 0, 0);
     }
-    setDraggedId(item.id);
-  }
-
-  function moveDragPreview(clientX: number, clientY: number) {
-    const preview = dragPreviewRef.current;
-    if (!preview) return;
-    const width = preview.offsetWidth;
-    const height = preview.offsetHeight;
-    preview.style.transform = `translate(${clientX - width / 2}px, ${clientY - height / 2}px)`;
+    setDraggedId(entryKey);
   }
 
   function finishDrag() {
@@ -272,20 +312,9 @@ export function WatchlistClient({
     dragPreviewRef.current = null;
   }
 
-  useEffect(() => {
-    if (!draggedId) return;
-
-    const handleDragOver = (event: DragEvent) => {
-      moveDragPreview(event.clientX, event.clientY);
-    };
-
-    document.addEventListener("dragover", handleDragOver);
-    return () => document.removeEventListener("dragover", handleDragOver);
-  }, [draggedId]);
-
-  function handleDrop(targetRank: number) {
+  function handleDrop(targetItemId: WatchlistEntryKey) {
     if (!manageMode || !isOwner || draggedId == null) return;
-    updateRank(draggedId, targetRank);
+    updateRank(draggedId, targetItemId);
     setDraggedId(null);
     setDragOverId(null);
   }
@@ -331,7 +360,13 @@ export function WatchlistClient({
             <div className="group relative">
               <button
                 type="button"
-                onClick={() => setManageMode((current) => !current)}
+                onClick={() => {
+                  if (!manageMode && activeSort !== "rank") {
+                    navigate({ sort: "rank", order: "asc", page: 1 });
+                    return;
+                  }
+                  setManageMode((current) => !current);
+                }}
                 className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                   manageMode
                     ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
@@ -441,138 +476,150 @@ export function WatchlistClient({
           <EmptyState />
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6">
-            {filteredItems.map((item, index) => (
+            {filteredItems.map((item) => {
+              const entryKey = getEntryKey(item);
+              return (
+                <div
+                  key={entryKey}
+                  data-drag-card="true"
+                  className={`group relative rounded-lg transition-all ${
+                    manageMode && isOwner && dragOverId === entryKey
+                      ? "ring-2 ring-cyan-400/70"
+                      : ""
+                  }`}
+                  onDragOver={(event) => {
+                    if (manageMode && isOwner) event.preventDefault();
+                  }}
+                  onDragEnter={() => {
+                    if (manageMode && isOwner) setDragOverId(entryKey);
+                  }}
+                  onDragLeave={() => {
+                    if (manageMode && isOwner && dragOverId === entryKey) setDragOverId(null);
+                  }}
+                  onDrop={() => {
+                    if (draggedId === entryKey) return;
+                    handleDrop(entryKey);
+                  }}
+                >
+                  <div className="absolute left-1/2 top-0 z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-[48%] items-center justify-center rounded-full border-2 border-white bg-zinc-900 px-1 text-[11px] font-bold text-white shadow-lg">
+                    {item.rank}
+                  </div>
+                  <MediaCard
+                    title={item.title}
+                    primaryText={item.title}
+                    secondaryText={getItemMeta(item) || undefined}
+                    href={item.href}
+                    backdropUrl={item.backdropUrl}
+                    posterUrl={item.posterUrl}
+                    rating={item.rating}
+                    mediaType={item.mediaType}
+                    ids={item.ids}
+                    variant="poster"
+                    showInlineActions
+                    isInWatchlist
+                    disableHover={manageMode}
+                    squareBottom={true}
+                  />
+
+                  {manageMode && isOwner && (
+                    <div
+                      draggable
+                      onDragStart={(event) => beginDrag(event, item)}
+                      onDragEnd={finishDrag}
+                      className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
+                      aria-label={`Drag ${item.title}`}
+                      title={`Drag ${item.title}`}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : filteredItems.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="space-y-2">
+          {filteredItems.map((item) => {
+            const entryKey = getEntryKey(item);
+            return (
               <div
-                key={`${item.id}-${index}`}
+                key={entryKey}
                 data-drag-card="true"
-                className={`group relative rounded-lg transition-all ${
-                  manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
+                className={`group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05] ${
+                  manageMode && isOwner && dragOverId === entryKey ? "ring-2 ring-cyan-400/70" : ""
                 }`}
                 onDragOver={(event) => {
                   if (manageMode && isOwner) event.preventDefault();
                 }}
                 onDragEnter={() => {
-                  if (manageMode && isOwner) setDragOverId(item.id);
+                  if (manageMode && isOwner) setDragOverId(entryKey);
                 }}
                 onDragLeave={() => {
-                  if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
+                  if (manageMode && isOwner && dragOverId === entryKey) setDragOverId(null);
                 }}
                 onDrop={() => {
-                  if (draggedId === item.id) return;
-                  handleDrop(item.rank);
+                  if (draggedId === entryKey) return;
+                  handleDrop(entryKey);
                 }}
               >
-                <div className="absolute left-1/2 top-0 z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-[48%] items-center justify-center rounded-full border-2 border-white bg-zinc-900 px-1 text-[11px] font-bold text-white shadow-lg">
+                <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
                   {item.rank}
                 </div>
-                <MediaCard
-                  title={item.title}
-                  primaryText={item.title}
-                  secondaryText={item.year ? String(item.year) : undefined}
+                <Link
                   href={item.href}
-                  backdropUrl={item.backdropUrl}
-                  posterUrl={item.posterUrl}
-                  rating={item.rating}
-                  mediaType={item.mediaType}
-                  ids={item.ids}
-                  variant="poster"
-                  showInlineActions
-                  isInWatchlist
-                  disableHover={manageMode}
-                  squareBottom={true}
-                />
+                  className="relative h-[4.5rem] w-12 shrink-0 overflow-hidden rounded-xl bg-zinc-800 ring-1 ring-white/8"
+                >
+                  {item.posterUrl ? (
+                    <Image
+                      src={item.posterUrl}
+                      alt={item.title}
+                      fill
+                      className="object-cover"
+                      sizes="48px"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-zinc-700">
+                      {item.type === "movie" ? "M" : "T"}
+                    </div>
+                  )}
+                </Link>
+                <Link href={item.href} className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-semibold text-zinc-100 group-hover:text-white">
+                    {item.title}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+                    {getItemMeta(item) && (
+                      <span className="rounded-full bg-white/[0.06] px-2 py-1 text-zinc-300">
+                        {getItemMeta(item)}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-300">
+                      {item.type === "movie" ? "Film" : "TV"}
+                    </span>
+                  </div>
+                </Link>
+                <span className="hidden shrink-0 rounded-full bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-400 sm:inline">
+                  Added{" "}
+                  {new Date(item.listedAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
 
                 {manageMode && isOwner && (
                   <div
                     draggable
                     onDragStart={(event) => beginDrag(event, item)}
                     onDragEnd={finishDrag}
-                    className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
+                    className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
                     aria-label={`Drag ${item.title}`}
                     title={`Drag ${item.title}`}
                   />
                 )}
               </div>
-            ))}
-          </div>
-        )
-      ) : filteredItems.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="space-y-1">
-          {filteredItems.map((item, index) => (
-            <div
-              key={`${item.id}-${index}`}
-              data-drag-card="true"
-              className={`group relative flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04] ${
-                manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
-              }`}
-              onDragOver={(event) => {
-                if (manageMode && isOwner) event.preventDefault();
-              }}
-              onDragEnter={() => {
-                if (manageMode && isOwner) setDragOverId(item.id);
-              }}
-              onDragLeave={() => {
-                if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
-              }}
-              onDrop={() => {
-                if (draggedId === item.id) return;
-                handleDrop(item.rank);
-              }}
-            >
-              <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
-                {item.rank}
-              </div>
-              <Link
-                href={item.href}
-                className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
-              >
-                {item.posterUrl ? (
-                  <Image
-                    src={item.posterUrl}
-                    alt={item.title}
-                    fill
-                    className="object-cover"
-                    sizes="40px"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-zinc-700">
-                    {item.type === "movie" ? "M" : "T"}
-                  </div>
-                )}
-              </Link>
-              <Link href={item.href} className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
-                  {item.title}
-                </p>
-                <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                  {item.year && <span>{item.year}</span>}
-                  <span className="rounded px-1 py-0.5 text-[9px] font-semibold uppercase bg-white/5 text-zinc-400">
-                    {item.type === "movie" ? "Film" : "TV"}
-                  </span>
-                </div>
-              </Link>
-              <span className="hidden shrink-0 text-[11px] text-zinc-600 sm:inline">
-                Added{" "}
-                {new Date(item.listedAt).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
-
-              {manageMode && isOwner && (
-                <div
-                  draggable
-                  onDragStart={(event) => beginDrag(event, item)}
-                  onDragEnd={finishDrag}
-                  className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
-                  aria-label={`Drag ${item.title}`}
-                  title={`Drag ${item.title}`}
-                />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

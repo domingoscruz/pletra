@@ -723,6 +723,7 @@ async function UserLast30Days({ slug }: { slug: string }) {
     return (
       <Last30DaysChart
         slug={slug}
+        variant="profile"
         totalWatchTime={formatMinutesCompact(totalMinutes)}
         episodeCount={episodeItems.length}
         movieCount={movieItems.length}

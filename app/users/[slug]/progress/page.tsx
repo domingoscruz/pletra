@@ -725,7 +725,7 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     return (
       <main className="relative bg-black">
         {backdropImage && (
-          <div className="fixed inset-0 -z-10 overflow-hidden">
+          <div className="mt-4 rounded-2xl bg-black/40 p-3 backdrop-blur-md md:p-5">
             <Image
               src={backdropImage}
               alt="Backdrop"
@@ -733,12 +733,12 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
               priority
               className="object-cover opacity-20 blur-3xl scale-110"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-zinc-950/80 to-zinc-950" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-zinc-950/80 to-zinc-950 rounded-2xl" />
           </div>
         )}
 
         <div className="relative z-10 mx-auto max-w-[112.5rem] px-0 pb-4 pt-1 md:pb-6 md:pt-2">
-          <div className="min-h-[calc(100dvh-3.25rem)] overflow-hidden rounded-2xl border border-white/8 bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
+          <div className="min-h-[calc(100dvh-3.25rem)] overflow-hidden rounded-[1.75rem] border border-white/8 bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
             <ProgressClient
               slug={slug}
               items={items}

@@ -9,6 +9,13 @@ import { cn } from "@/lib/utils";
 // --- Exported Utilities & Constants ---
 
 let sharedWatchlistPromise: Promise<number[]> | null = null;
+let sharedPersonalListsPromise: Promise<PersonalListOption[]> | null = null;
+
+type PersonalListOption = {
+  name: string;
+  slug: string;
+  privacy: string;
+};
 
 export const fetchWatchlistIds = () => {
   if (!sharedWatchlistPromise) {
@@ -37,6 +44,34 @@ export const fetchWatchlistIds = () => {
       });
   }
   return sharedWatchlistPromise;
+};
+
+const fetchPersonalLists = () => {
+  if (!sharedPersonalListsPromise) {
+    sharedPersonalListsPromise = fetchTraktRouteJson<
+      Array<{ name?: string; privacy?: string; ids?: { slug?: string } }>
+    >("/api/trakt/users/me/lists", {
+      cache: "no-store",
+      timeoutMs: 10000,
+      maxRetries: 1,
+    })
+      .then((data) => data ?? [])
+      .then((data) =>
+        data
+          .map((item) => ({
+            name: item.name?.trim() || "Untitled List",
+            slug: item.ids?.slug?.trim() || "",
+            privacy: item.privacy ?? "private",
+          }))
+          .filter((item) => item.slug),
+      )
+      .catch(() => {
+        sharedPersonalListsPromise = null;
+        return [];
+      });
+  }
+
+  return sharedPersonalListsPromise;
 };
 
 export const TRAKT_RATINGS: Record<number, string> = {
@@ -186,6 +221,10 @@ export function CardActions({
 
   const [watched, setWatched] = useState(isWatched);
   const [inWatchlist, setInWatchlist] = useState(isInWatchlist);
+  const [availableLists, setAvailableLists] = useState<PersonalListOption[]>([]);
+  const [selectedListSlugs, setSelectedListSlugs] = useState<string[]>([]);
+  const [listsLoading, setListsLoading] = useState(false);
+  const [listsError, setListsError] = useState<string | null>(null);
 
   const triggerRef = useRef<HTMLDivElement>(null);
   const timeListRef = useRef<HTMLDivElement>(null);
@@ -203,6 +242,7 @@ export function CardActions({
   const targetIds = episodeIds ? episodeIds : ids;
   const traktId = targetIds?.trakt ? Number(targetIds.trakt) : null;
   const activeRatingColor = getRibbonColor(localRating);
+  const listPayloadKey = episodeIds ? "episodes" : mediaType;
 
   const months = [
     "January",
@@ -296,6 +336,28 @@ export function CardActions({
     if (isInWatchlist) setInWatchlist(true);
   }, [traktId, isWatched, userRating, isInWatchlist]);
 
+  useEffect(() => {
+    if (!showListOptions) return;
+
+    setSelectedListSlugs([]);
+    setListsError(null);
+
+    if (availableLists.length > 0) return;
+
+    setListsLoading(true);
+    fetchPersonalLists()
+      .then((lists) => {
+        setAvailableLists(lists);
+        if (lists.length === 0) {
+          setListsError("No personal lists found.");
+        }
+      })
+      .catch(() => {
+        setListsError("Failed to load your lists.");
+      })
+      .finally(() => setListsLoading(false));
+  }, [availableLists.length, showListOptions]);
+
   const handleMouseEnterTooltip = (e: React.MouseEvent, text: string) => {
     if (showWatchOptions || showListOptions || showRating) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -327,6 +389,53 @@ export function CardActions({
     } else {
       setInWatchlist(action !== "add");
       setToastMessage(result.message ?? "Failed to update watchlist.");
+    }
+
+    setIsLoading(false);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const toggleListSelection = (slug: string) => {
+    setSelectedListSlugs((current) =>
+      current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug],
+    );
+  };
+
+  const handleAddToSelectedLists = async () => {
+    if (isLoading || selectedListSlugs.length === 0) return;
+
+    setIsLoading(true);
+
+    let addedCount = 0;
+    let failedCount = 0;
+
+    for (const listSlug of selectedListSlugs) {
+      try {
+        await fetchTraktRouteJson(
+          `/api/trakt/users/me/lists/${encodeURIComponent(listSlug)}/items`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              [listPayloadKey]: [{ ids: targetIds }],
+            }),
+            timeoutMs: 10000,
+          },
+        );
+        addedCount += 1;
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (addedCount > 0 && failedCount === 0) {
+      setToastMessage(addedCount === 1 ? "Added to 1 list!" : `Added to ${addedCount} lists!`);
+      setSelectedListSlugs([]);
+      setShowListOptions(false);
+    } else if (addedCount > 0) {
+      setToastMessage(`Added to ${addedCount} lists, ${failedCount} failed.`);
+    } else {
+      setToastMessage("Failed to add to selected lists.");
     }
 
     setIsLoading(false);
@@ -981,14 +1090,14 @@ export function CardActions({
             <div
               className={cn(
                 "w-full animate-in fade-in zoom-in-95 duration-200 rounded-xl bg-zinc-900 p-4 shadow-2xl ring-1 ring-white/20",
-                !isMobile && "w-[240px]",
+                !isMobile && "w-[320px]",
                 !isMobile && (shouldFlip ? "absolute top-4" : "absolute bottom-4"),
               )}
             >
               <p className="mb-3 text-center text-[10px] font-black uppercase tracking-widest text-zinc-500">
                 Lists
               </p>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <button
                   onClick={() => handleWatchlistAction(inWatchlist ? "remove" : "add")}
                   disabled={isLoading}
@@ -1001,6 +1110,68 @@ export function CardActions({
                 >
                   {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
                 </button>
+
+                <div className="rounded-lg border border-white/8 bg-black/20 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                      Add To Lists
+                    </p>
+                    <span className="text-[10px] text-zinc-600">
+                      {selectedListSlugs.length} selected
+                    </span>
+                  </div>
+
+                  {listsLoading ? (
+                    <p className="text-[11px] text-zinc-500">Loading your lists...</p>
+                  ) : availableLists.length === 0 ? (
+                    <p className="text-[11px] text-zinc-500">
+                      {listsError ?? "Create a personal list first."}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="max-h-48 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                        {availableLists.map((list) => {
+                          const selected = selectedListSlugs.includes(list.slug);
+                          return (
+                            <label
+                              key={list.slug}
+                              className={cn(
+                                "flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 transition-colors",
+                                selected
+                                  ? "border-cyan-500/30 bg-cyan-500/10"
+                                  : "border-white/8 bg-white/[0.03] hover:bg-white/[0.05]",
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => toggleListSelection(list.slug)}
+                                className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-zinc-950 text-cyan-400"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[11px] font-semibold text-zinc-100">
+                                  {list.name}
+                                </span>
+                                <span className="block text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                                  {list.privacy}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddToSelectedLists}
+                        disabled={isLoading || selectedListSlugs.length === 0}
+                        className="mt-3 w-full rounded-md bg-cyan-500 px-3 py-2 text-[10px] font-black uppercase text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isLoading ? "Saving..." : "Add To Selected Lists"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1070,7 +1241,7 @@ export function CardActions({
   return (
     <div
       ref={triggerRef}
-      className="relative flex w-full items-center justify-between bg-zinc-900/50 rounded-b-lg overflow-visible px-0"
+      className="relative flex w-full items-center justify-between overflow-hidden rounded-b-lg bg-zinc-900/50 px-0"
     >
       {renderPortalContent()}
 
@@ -1110,15 +1281,15 @@ export function CardActions({
           aria-label={watched ? "Open history actions" : "Open watch actions"}
           title={watched ? "Open history actions" : "Open watch actions"}
           className={cn(
-            "flex h-8 w-10 shrink-0 items-center justify-center transition-all rounded-bl-lg",
+            "flex h-8 w-10 shrink-0 items-center justify-center rounded-bl-lg transition-all",
             watched ? "bg-[#2d7a30]" : "bg-purple-600 hover:bg-purple-500",
           )}
         >
           <svg
-            className="h-5 w-5 text-white"
+            className="h-[1.35rem] w-[1.35rem] text-white"
             fill="none"
             stroke="currentColor"
-            strokeWidth={3.5}
+            strokeWidth={3}
             viewBox="0 0 24 24"
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -1144,7 +1315,7 @@ export function CardActions({
               : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
           )}
         >
-          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+          <svg className="h-[1.1rem] w-[1.1rem]" fill="currentColor" viewBox="0 0 24 24">
             <path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z" />
           </svg>
         </button>
@@ -1172,7 +1343,7 @@ export function CardActions({
           localRating ? `Open rating actions, current rating ${localRating}` : "Open rating actions"
         }
         className={cn(
-          "flex h-8 shrink-0 items-center justify-center px-3 transition-colors hover:bg-zinc-800/80 rounded-br-lg",
+          "flex h-8 shrink-0 items-center justify-center rounded-br-lg px-3 transition-colors hover:bg-zinc-800/80",
           localRating ? "" : "text-zinc-500 hover:text-red-400",
         )}
       >

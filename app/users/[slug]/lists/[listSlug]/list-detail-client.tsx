@@ -8,6 +8,7 @@ import { ViewToggle } from "@/components/ui/view-toggle";
 import { Select } from "@/components/ui/select";
 import { MediaCard } from "@/components/dashboard/media-card";
 import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
+import { formatRuntime } from "@/lib/format";
 import { useSettings } from "@/lib/settings";
 import { useToast } from "@/lib/toast";
 import { useNavigate } from "@/lib/use-navigate";
@@ -81,11 +82,58 @@ const typeFilters = [
 const manageStorageKey = (slug: string, listSlug: string) =>
   `pletra-list-manage-${slug}-${listSlug}`;
 
+function shouldUseManagedOrder(isOwner: boolean, manageMode: boolean, sortBy: string) {
+  return isOwner && manageMode && sortBy === "rank";
+}
+
 function createTransparentDragImage() {
   const pixel = document.createElement("canvas");
   pixel.width = 1;
   pixel.height = 1;
   return pixel;
+}
+
+function createDragPreviewLabel(title: string, meta?: string) {
+  const preview = document.createElement("div");
+  preview.style.position = "fixed";
+  preview.style.left = "-9999px";
+  preview.style.top = "-9999px";
+  preview.style.pointerEvents = "none";
+  preview.style.zIndex = "9999";
+  preview.style.maxWidth = "220px";
+  preview.style.border = "1px solid rgba(255,255,255,0.12)";
+  preview.style.borderRadius = "14px";
+  preview.style.background = "rgba(10,10,10,0.96)";
+  preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
+  preview.style.padding = "12px 14px";
+  preview.style.color = "white";
+
+  const titleEl = document.createElement("div");
+  titleEl.style.fontSize = "12px";
+  titleEl.style.fontWeight = "700";
+  titleEl.style.lineHeight = "1.3";
+  titleEl.textContent = title;
+  preview.appendChild(titleEl);
+
+  if (meta) {
+    const metaEl = document.createElement("div");
+    metaEl.style.marginTop = "4px";
+    metaEl.style.fontSize = "10px";
+    metaEl.style.letterSpacing = "0.08em";
+    metaEl.style.textTransform = "uppercase";
+    metaEl.style.color = "rgba(161,161,170,1)";
+    metaEl.textContent = meta;
+    preview.appendChild(metaEl);
+  }
+
+  return preview;
+}
+
+function getItemMeta(item: ListEntry) {
+  const parts: string[] = [];
+  if (item.year) parts.push(String(item.year));
+  if (item.type === "movie" && item.runtime) parts.push(formatRuntime(item.runtime));
+  return parts.join(" - ");
 }
 
 function matchesTypeFilter(item: ListEntry, filter: string) {
@@ -287,7 +335,7 @@ export function ListDetailClient({
   }, [items]);
 
   useEffect(() => {
-    if (!isOwner) return;
+    if (!isOwner || sortBy !== "rank") return;
     try {
       const raw = localStorage.getItem(manageStorageKey(slug, listSlug));
       if (!raw) return;
@@ -307,15 +355,15 @@ export function ListDetailClient({
     } catch {
       return;
     }
-  }, [isOwner, listSlug, slug]);
+  }, [isOwner, listSlug, slug, sortBy]);
 
   useEffect(() => {
-    if (!isOwner || !manageMode) return;
+    if (!shouldUseManagedOrder(isOwner, manageMode, sortBy)) return;
     localStorage.setItem(
       manageStorageKey(slug, listSlug),
       JSON.stringify(managedItems.map((item) => item.id)),
     );
-  }, [isOwner, listSlug, manageMode, managedItems, slug]);
+  }, [isOwner, listSlug, manageMode, managedItems, slug, sortBy]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -325,7 +373,7 @@ export function ListDetailClient({
   }, []);
 
   const filtered = useMemo(() => {
-    let result = managedItems;
+    let result = shouldUseManagedOrder(isOwner, manageMode, sortBy) ? managedItems : items;
 
     if (typeFilter !== "all") {
       result = result.filter((item) => matchesTypeFilter(item, typeFilter));
@@ -341,7 +389,7 @@ export function ListDetailClient({
     }
 
     return result;
-  }, [genreFilter, managedItems, search, typeFilter]);
+  }, [genreFilter, isOwner, items, manageMode, managedItems, search, sortBy, typeFilter]);
 
   function isVisibleItem(item: ListEntry) {
     if (typeFilter !== "all" && !matchesTypeFilter(item, typeFilter)) return false;
@@ -364,22 +412,19 @@ export function ListDetailClient({
     navigateWithFilters(sortBy, sortHow === "asc" ? "desc" : "asc", 1, genreFilter || undefined);
   }
 
-  function updateRank(itemId: number, nextRank: number) {
+  function updateRank(itemId: number, targetItemId: number) {
     setManagedItems((current) => {
       const visiblePositions = current
         .map((item, index) => (isVisibleItem(item) ? index : -1))
         .filter((index) => index >= 0);
       const visibleItems = visiblePositions.map((index) => current[index]);
-      const index = visibleItems.findIndex((item) => item.id === itemId);
-      if (index === -1) return current;
-
-      const targetIndex = visibleItems.findIndex((item) => item.rank >= nextRank);
-      const normalizedIndex =
-        targetIndex === -1 ? visibleItems.length - 1 : Math.max(0, targetIndex);
+      const fromIndex = visibleItems.findIndex((item) => item.id === itemId);
+      const toIndex = visibleItems.findIndex((item) => item.id === targetItemId);
+      if (fromIndex === -1 || toIndex === -1) return current;
 
       const reorderedVisible = [...visibleItems];
-      const [moved] = reorderedVisible.splice(index, 1);
-      reorderedVisible.splice(normalizedIndex, 0, moved);
+      const [moved] = reorderedVisible.splice(fromIndex, 1);
+      reorderedVisible.splice(toIndex, 0, moved);
 
       const next = [...current];
       visiblePositions.forEach((position, visibleIndex) => {
@@ -392,39 +437,18 @@ export function ListDetailClient({
 
   function beginDrag(event: React.DragEvent<HTMLDivElement>, item: ListEntry) {
     if (!manageMode || !isOwner) return;
-    const sourceCard = event.currentTarget.closest("[data-drag-card='true']");
-    if (sourceCard instanceof HTMLElement) {
-      const preview = sourceCard.cloneNode(true) as HTMLElement;
-      const rect = sourceCard.getBoundingClientRect();
-      preview.style.position = "fixed";
-      preview.style.left = "0";
-      preview.style.top = "0";
-      preview.style.width = `${Math.round(rect.width)}px`;
-      preview.style.pointerEvents = "none";
-      preview.style.zIndex = "2000";
-      preview.style.margin = "0";
-      preview.style.transform = `translate(${event.clientX - rect.width / 2}px, ${event.clientY - rect.height / 2}px)`;
-      preview.style.opacity = "0.95";
-      preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
-      preview.style.rotate = "-2deg";
-      preview.setAttribute("aria-hidden", "true");
-      document.body.appendChild(preview);
-      dragPreviewRef.current = preview;
-    }
+    dragPreviewRef.current?.remove();
+    const preview = createDragPreviewLabel(item.title, getItemMeta(item));
+    document.body.appendChild(preview);
+    dragPreviewRef.current = preview;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", String(item.id));
-    if (transparentDragImageRef.current) {
+    if (dragPreviewRef.current) {
+      event.dataTransfer.setDragImage(dragPreviewRef.current, 110, 24);
+    } else if (transparentDragImageRef.current) {
       event.dataTransfer.setDragImage(transparentDragImageRef.current, 0, 0);
     }
     setDraggedId(item.id);
-  }
-
-  function moveDragPreview(clientX: number, clientY: number) {
-    const preview = dragPreviewRef.current;
-    if (!preview) return;
-    const width = preview.offsetWidth;
-    const height = preview.offsetHeight;
-    preview.style.transform = `translate(${clientX - width / 2}px, ${clientY - height / 2}px)`;
   }
 
   function finishDrag() {
@@ -434,20 +458,9 @@ export function ListDetailClient({
     dragPreviewRef.current = null;
   }
 
-  useEffect(() => {
-    if (!draggedId) return;
-
-    const handleDragOver = (event: DragEvent) => {
-      moveDragPreview(event.clientX, event.clientY);
-    };
-
-    document.addEventListener("dragover", handleDragOver);
-    return () => document.removeEventListener("dragover", handleDragOver);
-  }, [draggedId]);
-
-  function handleDrop(targetRank: number) {
+  function handleDrop(targetItemId: number) {
     if (!manageMode || !isOwner || draggedId == null) return;
-    updateRank(draggedId, targetRank);
+    updateRank(draggedId, targetItemId);
     setDraggedId(null);
     setDragOverId(null);
   }
@@ -569,7 +582,13 @@ export function ListDetailClient({
               <div className="group relative">
                 <button
                   type="button"
-                  onClick={() => setManageMode((current) => !current)}
+                  onClick={() => {
+                    if (!manageMode && sortBy !== "rank") {
+                      navigateWithFilters("rank", "asc", 1, genreFilter || undefined);
+                      return;
+                    }
+                    setManageMode((current) => !current);
+                  }}
                   className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                     manageMode
                       ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
@@ -683,9 +702,9 @@ export function ListDetailClient({
           <EmptyState />
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6">
-            {filtered.map((item, index) => (
+            {filtered.map((item) => (
               <div
-                key={`${item.id}-${index}`}
+                key={item.id}
                 data-drag-card="true"
                 className={`group relative rounded-lg transition-all ${
                   manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
@@ -701,7 +720,7 @@ export function ListDetailClient({
                 }}
                 onDrop={() => {
                   if (draggedId === item.id) return;
-                  handleDrop(item.rank);
+                  handleDrop(item.id);
                 }}
               >
                 {showRanks && (
@@ -750,7 +769,7 @@ export function ListDetailClient({
                     <MediaCard
                       title={item.title}
                       primaryText={item.title}
-                      secondaryText={item.year ? String(item.year) : undefined}
+                      secondaryText={getItemMeta(item) || undefined}
                       href={item.href}
                       backdropUrl={item.backdropUrl}
                       posterUrl={item.posterUrl}
@@ -782,12 +801,12 @@ export function ListDetailClient({
       ) : filtered.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="space-y-1">
-          {filtered.map((item, index) => (
+        <div className="space-y-2">
+          {filtered.map((item) => (
             <div
-              key={`${item.id}-${index}`}
+              key={item.id}
               data-drag-card="true"
-              className={`group relative flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04] ${
+              className={`group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05] ${
                 manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
               }`}
               onDragOver={(event) => {
@@ -801,7 +820,7 @@ export function ListDetailClient({
               }}
               onDrop={() => {
                 if (draggedId === item.id) return;
-                handleDrop(item.rank);
+                handleDrop(item.id);
               }}
             >
               {showRanks && (
@@ -812,7 +831,7 @@ export function ListDetailClient({
 
               <Link
                 href={item.href}
-                className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
+                className="relative h-[4.5rem] w-12 shrink-0 overflow-hidden rounded-xl bg-zinc-800 ring-1 ring-white/8"
               >
                 {item.posterUrl ? (
                   <Image
@@ -820,7 +839,7 @@ export function ListDetailClient({
                     alt={item.title}
                     fill
                     className="object-cover"
-                    sizes="40px"
+                    sizes="48px"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-zinc-700">
@@ -830,16 +849,20 @@ export function ListDetailClient({
               </Link>
 
               <Link href={item.href} className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
+                <p className="truncate text-[15px] font-semibold text-zinc-100 group-hover:text-white">
                   {item.title}
                 </p>
-                <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                  {item.year && <span>{item.year}</span>}
-                  <span className="rounded px-1 py-0.5 text-[9px] font-semibold uppercase bg-white/5 text-zinc-400">
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+                  {getItemMeta(item) && (
+                    <span className="rounded-full bg-white/[0.06] px-2 py-1 text-zinc-300">
+                      {getItemMeta(item)}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-300">
                     {item.type === "movie" ? "Film" : item.type === "show" ? "TV" : "Person"}
                   </span>
                   {item.genres.length > 0 && (
-                    <span className="hidden truncate sm:inline">
+                    <span className="hidden rounded-full bg-white/[0.04] px-2 py-1 text-zinc-400 sm:inline">
                       {item.genres.slice(0, 2).join(", ")}
                     </span>
                   )}

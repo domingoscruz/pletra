@@ -86,7 +86,7 @@ function PosterCarousel({
 
   if (posters.length === 0) {
     return (
-      <div className="relative aspect-[2/3] bg-zinc-900 sm:h-full sm:min-h-[320px] sm:aspect-auto">
+      <div className="relative h-[320px] aspect-[2/3] bg-zinc-900">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.2),transparent_48%),linear-gradient(160deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))]" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/15 via-black/10 to-black/50" />
         <div className="absolute inset-0 flex items-center justify-center px-5 text-center">
@@ -100,7 +100,7 @@ function PosterCarousel({
   }
 
   return (
-    <div className="relative aspect-[2/3] overflow-hidden bg-zinc-950 sm:h-full sm:min-h-[320px] sm:aspect-auto">
+    <div className="relative h-[320px] aspect-[2/3] overflow-hidden bg-zinc-950">
       {posters.map((poster, index) => (
         <div
           key={poster.id}
