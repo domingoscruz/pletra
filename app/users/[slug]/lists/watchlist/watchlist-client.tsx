@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { ViewToggle } from "@/components/ui/view-toggle";
@@ -11,6 +11,7 @@ import { useNavigate } from "@/lib/use-navigate";
 
 type WatchlistEntry = {
   id: number;
+  rank: number;
   listedAt: string;
   type: string;
   title: string;
@@ -29,13 +30,14 @@ interface WatchlistClientProps {
   items: WatchlistEntry[];
   slug: string;
   currentType: string;
-  currentPage: number;
-  totalPages: number;
   activeSort: string;
+  activeOrder: string;
   activeGenre: string;
-  activeRuntime: string;
   activeSearch: string;
   allGenres: string[];
+  totalItems: number;
+  updatedAt: string | null;
+  isOwner: boolean;
 }
 
 const typeFilters = [
@@ -45,103 +47,257 @@ const typeFilters = [
 ];
 
 const sortOptions = [
-  { value: "added", label: "Date Added" },
-  { value: "title", label: "Title A–Z" },
-  { value: "released", label: "Release Date" },
-  { value: "percentage", label: "Rating" },
   { value: "rank", label: "Rank" },
+  { value: "added", label: "Added Date" },
+  { value: "percentage", label: "Average Rating" },
+  { value: "title", label: "Title" },
+  { value: "released", label: "Release Date" },
+  { value: "runtime", label: "Runtime" },
+  { value: "popularity", label: "Popularity" },
+  { value: "random", label: "Random" },
 ];
 
-const runtimeFilters = [
-  { value: "", label: "Any Runtime" },
-  { value: "0-60", label: "Under 1h" },
-  { value: "60-90", label: "1–1.5h" },
-  { value: "60-120", label: "1–2h" },
-  { value: "120-180", label: "2–3h" },
-  { value: "180-999", label: "3h+" },
-];
+const manageStorageKey = (slug: string) => `pletra-watchlist-manage-${slug}`;
 
 export function WatchlistClient({
   items,
   slug,
   currentType,
-  currentPage,
-  totalPages,
   activeSort,
+  activeOrder,
   activeGenre,
-  activeRuntime,
   activeSearch,
   allGenres,
+  totalItems,
+  updatedAt,
+  isOwner,
 }: WatchlistClientProps) {
   const { navigate: nav, isPending } = useNavigate();
   const { settings } = useSettings();
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [searchInput, setSearchInput] = useState(activeSearch);
-  const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [manageMode, setManageMode] = useState(false);
+  const [managedItems, setManagedItems] = useState(items);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
 
-  const navigate = useCallback(
-    (overrides: {
-      type?: string;
-      page?: number;
-      sort?: string;
-      genre?: string;
-      runtime?: string;
-      q?: string;
-    }) => {
-      const p = new URLSearchParams();
-      const t = overrides.type ?? currentType;
-      const pg = overrides.page ?? 1;
-      const s = overrides.sort ?? activeSort;
-      const g = overrides.genre ?? activeGenre;
-      const r = overrides.runtime ?? activeRuntime;
-      const q = overrides.q ?? activeSearch;
+  function navigate(overrides: {
+    type?: string;
+    page?: number;
+    sort?: string;
+    order?: string;
+    genre?: string;
+    q?: string;
+  }) {
+    const params = new URLSearchParams();
+    const type = overrides.type ?? currentType;
+    const page = overrides.page ?? 1;
+    const sort = overrides.sort ?? activeSort;
+    const order = overrides.order ?? activeOrder;
+    const genre = overrides.genre ?? activeGenre;
+    const q = overrides.q ?? activeSearch;
 
-      if (t !== "all") p.set("type", t);
-      if (pg > 1) p.set("page", String(pg));
-      if (s !== "added") p.set("sort", s);
-      if (g) p.set("genre", g);
-      if (r) p.set("runtime", r);
-      if (q) p.set("q", q);
+    if (type !== "all") params.set("type", type);
+    if (page > 1) params.set("page", String(page));
+    if (sort !== "rank") params.set("sort", sort);
+    if (order !== "asc") params.set("order", order);
+    if (genre) params.set("genre", genre);
+    if (q) params.set("q", q);
 
-      const qs = p.toString();
-      nav(`/users/${slug}/lists/watchlist${qs ? `?${qs}` : ""}`);
-    },
-    [nav, slug, currentType, activeSort, activeGenre, activeRuntime, activeSearch],
-  );
+    const query = params.toString();
+    nav(`/users/${slug}/lists/watchlist${query ? `?${query}` : ""}`);
+  }
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
-    if (searchTimerRef[0]) clearTimeout(searchTimerRef[0]);
-    searchTimerRef[0] = setTimeout(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
       navigate({ q: value, page: 1 });
     }, 400);
   }
 
+  useEffect(() => {
+    setManagedItems(items);
+  }, [items]);
+
+  useEffect(() => {
+    if (!isOwner) return;
+    try {
+      const raw = localStorage.getItem(manageStorageKey(slug));
+      if (!raw) return;
+      const ordered = JSON.parse(raw) as number[];
+      setManagedItems((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        const orderedItems = ordered
+          .map((id) => byId.get(id))
+          .filter((item): item is WatchlistEntry => Boolean(item));
+        const remaining = current.filter((item) => !ordered.includes(item.id));
+        return [...orderedItems, ...remaining].map((item, index) => ({ ...item, rank: index + 1 }));
+      });
+    } catch {
+      return;
+    }
+  }, [isOwner, slug]);
+
+  useEffect(() => {
+    if (!isOwner || !manageMode) return;
+    localStorage.setItem(
+      manageStorageKey(slug),
+      JSON.stringify(managedItems.map((item) => item.id)),
+    );
+  }, [isOwner, manageMode, managedItems, slug]);
+
+  const filteredItems = useMemo(() => managedItems, [managedItems]);
+
+  function updateRank(itemId: number, nextRank: number) {
+    setManagedItems((current) => {
+      const normalized = Math.max(1, Math.min(current.length, nextRank));
+      const index = current.findIndex((item) => item.id === itemId);
+      if (index === -1) return current;
+      const reordered = [...current];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(normalized - 1, 0, moved);
+      return reordered.map((item, orderIndex) => ({ ...item, rank: orderIndex + 1 }));
+    });
+  }
+
+  function toggleSortOrder() {
+    navigate({ order: activeOrder === "asc" ? "desc" : "asc", page: 1 });
+  }
+
+  function beginDrag(event: React.DragEvent<HTMLDivElement>, itemId: number) {
+    if (!manageMode || !isOwner) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(itemId));
+    setDraggedId(itemId);
+  }
+
+  function handleDrop(targetRank: number) {
+    if (!manageMode || !isOwner || draggedId == null) return;
+    updateRank(draggedId, targetRank);
+    setDraggedId(null);
+    setDragOverId(null);
+  }
+
   return (
-    <div className={`space-y-4 ${isPending ? "opacity-60 transition-opacity" : ""}`}>
-      {/* Controls row 1 */}
+    <div className={`space-y-5 ${isPending ? "opacity-60 transition-opacity" : ""}`}>
+      <div>
+        <Link
+          href={`/users/${slug}/lists`}
+          className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+          All Lists
+        </Link>
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-xl font-bold text-zinc-100">Watchlist</h2>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+              <span>{totalItems} items</span>
+              {updatedAt && (
+                <span>
+                  Updated{" "}
+                  {new Date(updatedAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {isOwner && (
+            <div className="group relative">
+              <button
+                type="button"
+                onClick={() => setManageMode((current) => !current)}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  manageMode
+                    ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                    : "border-white/8 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06] hover:text-white"
+                }`}
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 4v16M16 4v16M4 8h16M4 16h16"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 4l-2 2m2-2l2 2m6-2l-2 2m2-2l2 2M8 20l-2-2m2 2l2-2m6 2l-2-2m2 2l2-2M4 8l2-2m-2 2l2 2m0 8l-2-2m-2 2l2-2M20 8l-2-2m2 2l-2 2m2 8l-2-2m2 2l-2-2"
+                  />
+                </svg>
+                {manageMode ? "Done" : "Manage"}
+              </button>
+              <div className="pointer-events-none absolute top-full right-0 z-40 mt-2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-medium text-zinc-100 opacity-0 shadow-lg ring-1 ring-white/10 transition-opacity group-hover:opacity-100">
+                You can drag-and-drop to reorder.
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/5">
-          {typeFilters.map((f) => (
+          {typeFilters.map((filter) => (
             <button
-              key={f.value}
-              onClick={() => navigate({ type: f.value, page: 1, genre: "", runtime: "", q: "" })}
+              key={filter.value}
+              onClick={() => navigate({ type: filter.value, page: 1, genre: "", q: "" })}
               className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                currentType === f.value
+                currentType === filter.value
                   ? "bg-white/10 text-white"
                   : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {f.label}
+              {filter.label}
             </button>
           ))}
         </div>
 
         <Select
           value={activeSort}
-          onChange={(v) => navigate({ sort: v, page: 1 })}
+          onChange={(value) => navigate({ sort: value, page: 1 })}
           options={sortOptions}
+          className="z-[260]"
         />
+
+        {allGenres.length > 0 && (
+          <Select
+            value={activeGenre}
+            onChange={(value) => navigate({ genre: value, page: 1 })}
+            options={[
+              { value: "", label: "All Genres" },
+              ...allGenres.map((genre) => ({ value: genre, label: genre })),
+            ]}
+            className="z-[260]"
+          />
+        )}
+
+        <button
+          onClick={toggleSortOrder}
+          className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
+        >
+          {activeOrder === "asc" ? "Asc" : "Desc"}
+        </button>
 
         <div className="ml-auto flex items-center gap-3">
           <ViewToggle view={view} onChange={setView} />
@@ -161,68 +317,107 @@ export function WatchlistClient({
             </svg>
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Filter..."
               value={searchInput}
-              onChange={(e) => handleSearchChange(e.target.value)}
+              onChange={(event) => handleSearchChange(event.target.value)}
               className="w-48 rounded-lg bg-white/[0.03] py-1.5 pl-8 pr-3 text-xs text-zinc-300 ring-1 ring-white/5 placeholder:text-zinc-600 focus:outline-none focus:ring-white/20"
             />
           </div>
         </div>
       </div>
 
-      {/* Controls row 2: genre + runtime */}
-      <div className="flex flex-wrap items-center gap-3">
-        {allGenres.length > 0 && (
-          <Select
-            value={activeGenre}
-            onChange={(v) => navigate({ genre: v, page: 1 })}
-            options={[
-              { value: "", label: "All Genres" },
-              ...allGenres.map((g) => ({ value: g, label: g })),
-            ]}
-          />
-        )}
-
-        <Select
-          value={activeRuntime}
-          onChange={(v) => navigate({ runtime: v, page: 1 })}
-          options={runtimeFilters}
-        />
-      </div>
-
-      {/* Grid view */}
       {view === "grid" ? (
-        items.length === 0 ? (
+        filteredItems.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-            {items.map((item, i) => (
-              <MediaCard
-                key={`${item.id}-${i}`}
-                title={item.title}
-                subtitle={item.year ? String(item.year) : undefined}
-                href={item.href}
-                backdropUrl={item.backdropUrl}
-                posterUrl={item.posterUrl}
-                rating={item.rating}
-                mediaType={item.mediaType}
-                ids={item.ids}
-                variant="poster"
-              />
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6">
+            {filteredItems.map((item, index) => (
+              <div
+                key={`${item.id}-${index}`}
+                className={`group relative rounded-lg transition-all ${
+                  manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
+                }`}
+                onDragOver={(event) => {
+                  if (manageMode && isOwner) event.preventDefault();
+                }}
+                onDragEnter={() => {
+                  if (manageMode && isOwner) setDragOverId(item.id);
+                }}
+                onDragLeave={() => {
+                  if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
+                }}
+                onDrop={() => {
+                  if (draggedId === item.id) return;
+                  handleDrop(item.rank);
+                }}
+              >
+                <div className="absolute left-1/2 top-0 z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-[48%] items-center justify-center rounded-full border-2 border-white bg-zinc-900 px-1 text-[11px] font-bold text-white shadow-lg">
+                  {item.rank}
+                </div>
+                <MediaCard
+                  title={item.title}
+                  primaryText={item.title}
+                  secondaryText={item.year ? String(item.year) : undefined}
+                  href={item.href}
+                  backdropUrl={item.backdropUrl}
+                  posterUrl={item.posterUrl}
+                  rating={item.rating}
+                  mediaType={item.mediaType}
+                  ids={item.ids}
+                  variant="poster"
+                  showInlineActions
+                  isInWatchlist
+                  disableHover={manageMode}
+                />
+
+                {manageMode && isOwner && (
+                  <div
+                    draggable
+                    onDragStart={(event) => beginDrag(event, item.id)}
+                    onDragEnd={() => {
+                      setDraggedId(null);
+                      setDragOverId(null);
+                    }}
+                    className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
+                    aria-label={`Drag ${item.title}`}
+                    title={`Drag ${item.title}`}
+                  />
+                )}
+              </div>
             ))}
           </div>
         )
-      ) : items.length === 0 ? (
+      ) : filteredItems.length === 0 ? (
         <EmptyState />
       ) : (
         <div className="space-y-1">
-          {items.map((item, i) => (
-            <Link
-              key={`${item.id}-${i}`}
-              href={item.href}
-              className="group flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+          {filteredItems.map((item, index) => (
+            <div
+              key={`${item.id}-${index}`}
+              className={`group relative flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04] ${
+                manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
+              }`}
+              onDragOver={(event) => {
+                if (manageMode && isOwner) event.preventDefault();
+              }}
+              onDragEnter={() => {
+                if (manageMode && isOwner) setDragOverId(item.id);
+              }}
+              onDragLeave={() => {
+                if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
+              }}
+              onDrop={() => {
+                if (draggedId === item.id) return;
+                handleDrop(item.rank);
+              }}
             >
-              <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800">
+              <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
+                {item.rank}
+              </div>
+              <Link
+                href={item.href}
+                className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
+              >
                 {item.posterUrl ? (
                   <Image
                     src={item.posterUrl}
@@ -233,30 +428,21 @@ export function WatchlistClient({
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-zinc-700">
-                    {item.type === "movie" ? "🎬" : "📺"}
+                    {item.type === "movie" ? "M" : "T"}
                   </div>
                 )}
-              </div>
-              <div className="min-w-0 flex-1">
+              </Link>
+              <Link href={item.href} className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
                   {item.title}
                 </p>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-500">
                   {item.year && <span>{item.year}</span>}
-                  <span
-                    className={`rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${item.type === "movie" ? "bg-blue-500/10 text-blue-400" : "bg-purple-500/10 text-purple-400"}`}
-                  >
+                  <span className="rounded px-1 py-0.5 text-[9px] font-semibold uppercase bg-white/5 text-zinc-400">
                     {item.type === "movie" ? "Film" : "TV"}
                   </span>
                 </div>
-              </div>
-              {item.rating != null && (
-                <div
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${Math.round(item.rating * 10) >= 70 ? "bg-green-500/10 text-green-400" : Math.round(item.rating * 10) >= 50 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400"}`}
-                >
-                  {Math.round(item.rating * 10)}%
-                </div>
-              )}
+              </Link>
               <span className="hidden shrink-0 text-[11px] text-zinc-600 sm:inline">
                 Added{" "}
                 {new Date(item.listedAt).toLocaleDateString("en-US", {
@@ -264,31 +450,22 @@ export function WatchlistClient({
                   day: "numeric",
                 })}
               </span>
-            </Link>
-          ))}
-        </div>
-      )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-4">
-          <button
-            onClick={() => navigate({ page: currentPage - 1 })}
-            disabled={currentPage <= 1}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            ← Previous
-          </button>
-          <span className="text-xs tabular-nums text-zinc-500">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => navigate({ page: currentPage + 1 })}
-            disabled={currentPage >= totalPages}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            Next →
-          </button>
+              {manageMode && isOwner && (
+                <div
+                  draggable
+                  onDragStart={(event) => beginDrag(event, item.id)}
+                  onDragEnd={() => {
+                    setDraggedId(null);
+                    setDragOverId(null);
+                  }}
+                  className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
+                  aria-label={`Drag ${item.title}`}
+                  title={`Drag ${item.title}`}
+                />
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

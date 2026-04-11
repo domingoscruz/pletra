@@ -65,6 +65,11 @@ type PersonSummary = {
   ids?: { tmdb?: number; slug?: string };
 };
 
+type UserProfileSummary = {
+  username?: string;
+  name?: string;
+};
+
 export const getPersonData = cache(async (slug: string) => {
   try {
     const client = createTraktClient();
@@ -94,6 +99,25 @@ export const getPersonData = cache(async (slug: string) => {
   } catch (error) {
     if (!isTraktExpectedError(error)) {
       console.error("[Metadata] Failed to fetch person data:", error);
+    }
+    return null;
+  }
+});
+
+export const getUserProfileData = cache(async (slug: string) => {
+  try {
+    const client = createTraktClient();
+    const res = await client.users.profile({
+      params: { id: slug },
+      query: { extended: "full" },
+    });
+
+    if (res.status !== 200) return null;
+
+    return res.body as UserProfileSummary;
+  } catch (error) {
+    if (!isTraktExpectedError(error)) {
+      console.error("[Metadata] Failed to fetch user profile data:", error);
     }
     return null;
   }

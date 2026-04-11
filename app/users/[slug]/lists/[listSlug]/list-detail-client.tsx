@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
@@ -30,29 +30,45 @@ type ListEntry = {
   genres: string[];
 };
 
+type ListMeta = {
+  name?: string;
+  description?: string | null;
+  privacy?: string;
+  item_count?: number;
+  likes?: number;
+  sort_by?: string;
+  sort_how?: string;
+  updated_at?: string;
+  allow_comments?: boolean;
+  display_numbers?: boolean;
+};
+
 interface ListDetailClientProps {
   items: ListEntry[];
   slug: string;
   listSlug: string;
   sortBy: string;
   sortHow: string;
-  currentPage: number;
-  totalPages: number;
   isOwner: boolean;
   allGenres: string[];
   activeGenres: string;
-  activeRuntimes: string;
+  listInfo: ListMeta;
 }
 
 const sortOptions = [
   { value: "rank", label: "Rank" },
-  { value: "added", label: "Date Added" },
+  { value: "added", label: "Added Date" },
+  { value: "percentage", label: "Average Rating" },
   { value: "title", label: "Title" },
   { value: "released", label: "Release Date" },
   { value: "runtime", label: "Runtime" },
   { value: "popularity", label: "Popularity" },
-  { value: "percentage", label: "Rating %" },
-  { value: "votes", label: "Votes" },
+  { value: "random", label: "Random" },
+];
+
+const sortHowOptions = [
+  { value: "asc", label: "Asc" },
+  { value: "desc", label: "Desc" },
 ];
 
 const typeFilters = [
@@ -62,14 +78,173 @@ const typeFilters = [
   { value: "person", label: "People" },
 ];
 
-const runtimeFilters = [
-  { value: "", label: "Any Runtime" },
-  { value: "0-60", label: "Under 1h" },
-  { value: "60-90", label: "1–1.5h" },
-  { value: "60-120", label: "1–2h" },
-  { value: "120-180", label: "2–3h" },
-  { value: "180-999", label: "3h+" },
-];
+const manageStorageKey = (slug: string, listSlug: string) =>
+  `pletra-list-manage-${slug}-${listSlug}`;
+
+function matchesTypeFilter(item: ListEntry, filter: string) {
+  if (filter === "all") return true;
+  if (filter === "show") {
+    return item.type === "show" || item.type === "season" || item.type === "episode";
+  }
+  return item.type === filter;
+}
+
+function EmptyState() {
+  return (
+    <div className="flex items-center justify-center rounded-xl bg-white/[0.02] py-16 ring-1 ring-white/5">
+      <p className="text-sm text-zinc-500">No items found</p>
+    </div>
+  );
+}
+
+function ToggleField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+        {label}
+      </label>
+      <div className="flex overflow-hidden rounded-lg border border-white/8 bg-white/[0.03]">
+        <button
+          type="button"
+          onClick={() => onChange(true)}
+          className={`flex-1 px-4 py-2 text-sm font-semibold transition-colors ${
+            value ? "bg-white/12 text-white" : "text-zinc-500 hover:text-zinc-200"
+          }`}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(false)}
+          className={`flex-1 px-4 py-2 text-sm font-semibold transition-colors ${
+            !value ? "bg-white/12 text-white" : "text-zinc-500 hover:text-zinc-200"
+          }`}
+        >
+          No
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditListModal({
+  listInfo,
+  pending,
+  onClose,
+  onSave,
+}: {
+  listInfo: ListMeta;
+  pending: boolean;
+  onClose: () => void;
+  onSave: (payload: {
+    title: string;
+    description: string;
+    allowComments: boolean;
+    displayRank: boolean;
+    sortBy: string;
+    sortHow: string;
+  }) => void;
+}) {
+  const [title, setTitle] = useState(listInfo.name ?? "");
+  const [description, setDescription] = useState(listInfo.description ?? "");
+  const [allowComments, setAllowComments] = useState(listInfo.allow_comments ?? true);
+  const [displayRank, setDisplayRank] = useState(listInfo.display_numbers ?? true);
+  const [defaultSortBy, setDefaultSortBy] = useState(listInfo.sort_by ?? "rank");
+  const [defaultSortHow, setDefaultSortHow] = useState(listInfo.sort_how ?? "asc");
+
+  return (
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold italic text-zinc-100">
+              Update your {listInfo.name?.toLowerCase()}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <textarea
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          rows={4}
+          className="mt-5 w-full rounded-none border border-white/10 bg-white/[0.04] px-4 py-3 text-lg text-zinc-300 outline-none placeholder:text-zinc-600 focus:border-white/20"
+        />
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          className="mt-4 w-full rounded-none border border-white/10 bg-white/[0.04] px-4 py-3 text-lg font-semibold text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-white/20"
+          placeholder="List title"
+        />
+
+        <div className="mt-5 grid grid-cols-2 gap-5">
+          <ToggleField label="Allow Comments" value={allowComments} onChange={setAllowComments} />
+          <ToggleField label="Display Rank" value={displayRank} onChange={setDisplayRank} />
+        </div>
+
+        <div className="mt-5">
+          <label className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+            Default Sorting
+          </label>
+          <div className="flex gap-3">
+            <Select
+              value={defaultSortBy}
+              onChange={setDefaultSortBy}
+              options={sortOptions}
+              className="z-[1250] flex-1"
+            />
+            <Select
+              value={defaultSortHow}
+              onChange={setDefaultSortHow}
+              options={sortHowOptions}
+              className="z-[1250] w-24"
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() =>
+            onSave({
+              title,
+              description,
+              allowComments,
+              displayRank,
+              sortBy: defaultSortBy,
+              sortHow: defaultSortHow,
+            })
+          }
+          className="mt-6 w-full rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold uppercase tracking-[0.08em] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pending ? "Saving..." : "Save List"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function ListDetailClient({
   items,
@@ -77,14 +252,13 @@ export function ListDetailClient({
   listSlug,
   sortBy,
   sortHow,
-  currentPage,
-  totalPages,
   isOwner,
   allGenres,
   activeGenres,
-  activeRuntimes,
+  listInfo,
 }: ListDetailClientProps) {
   const { navigate: nav, isPending } = useNavigate();
+  const [isSaving, startSaving] = useTransition();
   const router = useRouter();
   const { settings } = useSettings();
   const { toast } = useToast();
@@ -93,58 +267,100 @@ export function ListDetailClient({
   const [removing, setRemoving] = useState<number | null>(null);
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [genreFilter, setGenreFilter] = useState(activeGenres);
-  const [runtimeFilter, setRuntimeFilter] = useState(activeRuntimes);
+  const [editOpen, setEditOpen] = useState(false);
+  const [manageMode, setManageMode] = useState(false);
+  const [managedItems, setManagedItems] = useState(items);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setManagedItems(items);
+  }, [items]);
+
+  useEffect(() => {
+    if (!isOwner) return;
+    try {
+      const raw = localStorage.getItem(manageStorageKey(slug, listSlug));
+      if (!raw) return;
+      const ordered = JSON.parse(raw) as number[];
+      setManagedItems((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        const orderedItems = ordered
+          .map((id) => byId.get(id))
+          .filter((item): item is ListEntry => Boolean(item));
+        const remaining = current.filter((item) => !ordered.includes(item.id));
+        return [...orderedItems, ...remaining].map((item, index) => ({ ...item, rank: index + 1 }));
+      });
+    } catch {
+      return;
+    }
+  }, [isOwner, listSlug, slug]);
+
+  useEffect(() => {
+    if (!isOwner || !manageMode) return;
+    localStorage.setItem(
+      manageStorageKey(slug, listSlug),
+      JSON.stringify(managedItems.map((item) => item.id)),
+    );
+  }, [isOwner, listSlug, manageMode, managedItems, slug]);
 
   const filtered = useMemo(() => {
-    let result = items;
+    let result = managedItems;
 
     if (typeFilter !== "all") {
-      result = result.filter((i) => i.type === typeFilter);
+      result = result.filter((item) => matchesTypeFilter(item, typeFilter));
+    }
+
+    if (genreFilter) {
+      result = result.filter((item) => item.genres.includes(genreFilter));
     }
 
     if (search) {
-      const q = search.toLowerCase();
-      result = result.filter((i) => i.title.toLowerCase().includes(q));
+      const query = search.toLowerCase();
+      result = result.filter((item) => item.title.toLowerCase().includes(query));
     }
 
     return result;
-  }, [items, typeFilter, search]);
+  }, [genreFilter, managedItems, search, typeFilter]);
 
-  function navigateWithFilters(
-    sort: string,
-    order: string,
-    page: number,
-    genres?: string,
-    runtimes?: string,
-  ) {
+  function navigateWithFilters(sort: string, order: string, page: number, genres?: string) {
     const params = new URLSearchParams();
     if (sort !== "rank") params.set("sort", sort);
     if (order !== "asc") params.set("order", order);
     if (page > 1) params.set("page", String(page));
     if (genres) params.set("genres", genres);
-    if (runtimes) params.set("runtimes", runtimes);
-    const qs = params.toString();
-    nav(`/users/${slug}/lists/${listSlug}${qs ? `?${qs}` : ""}`);
-  }
-
-  function applyGenreFilter(genre: string) {
-    setGenreFilter(genre);
-    navigateWithFilters(sortBy, sortHow, 1, genre || undefined, runtimeFilter || undefined);
-  }
-
-  function applyRuntimeFilter(runtime: string) {
-    setRuntimeFilter(runtime);
-    navigateWithFilters(sortBy, sortHow, 1, genreFilter || undefined, runtime || undefined);
+    const query = params.toString();
+    nav(`/users/${slug}/lists/${listSlug}${query ? `?${query}` : ""}`);
   }
 
   function toggleSortOrder() {
-    navigateWithFilters(
-      sortBy,
-      sortHow === "asc" ? "desc" : "asc",
-      1,
-      genreFilter || undefined,
-      runtimeFilter || undefined,
-    );
+    navigateWithFilters(sortBy, sortHow === "asc" ? "desc" : "asc", 1, genreFilter || undefined);
+  }
+
+  function updateRank(itemId: number, nextRank: number) {
+    setManagedItems((current) => {
+      const normalized = Math.max(1, Math.min(current.length, nextRank));
+      const index = current.findIndex((item) => item.id === itemId);
+      if (index === -1) return current;
+      const reordered = [...current];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(normalized - 1, 0, moved);
+      return reordered.map((item, orderIndex) => ({ ...item, rank: orderIndex + 1 }));
+    });
+  }
+
+  function beginDrag(event: React.DragEvent<HTMLDivElement>, itemId: number) {
+    if (!manageMode || !isOwner) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(itemId));
+    setDraggedId(itemId);
+  }
+
+  function handleDrop(targetRank: number) {
+    if (!manageMode || !isOwner || draggedId == null) return;
+    updateRank(draggedId, targetRank);
+    setDraggedId(null);
+    setDragOverId(null);
   }
 
   async function removeItem(entry: ListEntry) {
@@ -172,69 +388,178 @@ export function ListDetailClient({
     }
   }
 
+  function saveListSettings(payload: {
+    title: string;
+    description: string;
+    allowComments: boolean;
+    displayRank: boolean;
+    sortBy: string;
+    sortHow: string;
+  }) {
+    startSaving(() => {
+      void (async () => {
+        try {
+          await fetchTraktRouteJson(`/api/trakt/users/me/lists/${listSlug}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: payload.title,
+              description: payload.description,
+              privacy: listInfo.privacy ?? "private",
+              allow_comments: payload.allowComments,
+              display_numbers: payload.displayRank,
+              sort_by: payload.sortBy,
+              sort_how: payload.sortHow,
+            }),
+            timeoutMs: 10000,
+          });
+          setEditOpen(false);
+          toast("List updated.");
+          router.refresh();
+        } catch (error) {
+          toast(getErrorMessage(error, "Failed to update list."));
+        }
+      })();
+    });
+  }
+
+  const showRanks = manageMode || (listInfo.display_numbers ?? true);
+
   return (
-    <div className={`space-y-4 ${isPending ? "opacity-60" : ""}`}>
-      {/* Controls row 1 */}
+    <div className={`space-y-5 ${isPending ? "opacity-60" : ""}`}>
+      <div>
+        <Link
+          href={`/users/${slug}/lists`}
+          className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+          All Lists
+        </Link>
+
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-xl font-bold text-zinc-100">{listInfo.name}</h2>
+              <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                <span>{listInfo.item_count ?? 0} items</span>
+                {(listInfo.likes ?? 0) > 0 && <span>{listInfo.likes} likes</span>}
+                {listInfo.updated_at && (
+                  <span>
+                    Updated{" "}
+                    {new Date(listInfo.updated_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                )}
+              </div>
+            </div>
+            {listInfo.description && (
+              <p className="mt-1 text-sm text-zinc-400">{listInfo.description}</p>
+            )}
+          </div>
+
+          {isOwner && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                Edit
+              </button>
+              <div className="group relative">
+                <button
+                  type="button"
+                  onClick={() => setManageMode((current) => !current)}
+                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                    manageMode
+                      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                      : "border-white/8 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06] hover:text-white"
+                  }`}
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8 4v16M16 4v16M4 8h16M4 16h16"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M8 4l-2 2m2-2l2 2m6-2l-2 2m2-2l2 2M8 20l-2-2m2 2l2-2m6 2l-2-2m2 2l2-2M4 8l2-2m-2 2l2 2m0 8l-2-2m-2 2l2-2M20 8l-2-2m2 2l-2 2m2 8l-2-2m2 2l-2-2"
+                    />
+                  </svg>
+                  {manageMode ? "Done" : "Manage"}
+                </button>
+                <div className="pointer-events-none absolute top-full right-0 z-40 mt-2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-medium text-zinc-100 opacity-0 shadow-lg ring-1 ring-white/10 transition-opacity group-hover:opacity-100">
+                  You can drag-and-drop to reorder.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/5">
-          {typeFilters.map((f) => (
+          {typeFilters.map((filter) => (
             <button
-              key={f.value}
-              onClick={() => setTypeFilter(f.value)}
+              key={filter.value}
+              onClick={() => setTypeFilter(filter.value)}
               className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                typeFilter === f.value
+                typeFilter === filter.value
                   ? "bg-white/10 text-white"
                   : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              {f.label}
+              {filter.label}
             </button>
           ))}
         </div>
 
         <Select
           value={sortBy}
-          onChange={(v) =>
-            navigateWithFilters(v, sortHow, 1, genreFilter || undefined, runtimeFilter || undefined)
-          }
+          onChange={(value) => navigateWithFilters(value, sortHow, 1, genreFilter || undefined)}
           options={sortOptions}
+          className="z-[260]"
         />
+
+        {allGenres.length > 0 && (
+          <Select
+            value={genreFilter}
+            onChange={(value) => {
+              setGenreFilter(value);
+              navigateWithFilters(sortBy, sortHow, 1, value || undefined);
+            }}
+            options={[
+              { value: "", label: "All Genres" },
+              ...allGenres.map((genre) => ({ value: genre, label: genre })),
+            ]}
+            className="z-[260]"
+          />
+        )}
 
         <button
           onClick={toggleSortOrder}
           className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
         >
-          {sortHow === "asc" ? (
-            <>
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-              </svg>
-              Asc
-            </>
-          ) : (
-            <>
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-                />
-              </svg>
-              Desc
-            </>
-          )}
+          {sortHow === "asc" ? "Asc" : "Desc"}
         </button>
 
         <div className="ml-auto flex items-center gap-3">
@@ -257,94 +582,110 @@ export function ListDetailClient({
               type="text"
               placeholder="Filter..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               className="w-48 rounded-lg bg-white/[0.03] py-1.5 pl-8 pr-3 text-xs text-zinc-300 ring-1 ring-white/5 placeholder:text-zinc-600 focus:outline-none focus:ring-white/20"
             />
           </div>
         </div>
       </div>
 
-      {/* Controls row 2: genre + runtime (API-level filters) */}
-      <div className="flex flex-wrap items-center gap-3">
-        {allGenres.length > 0 && (
-          <Select
-            value={genreFilter}
-            onChange={applyGenreFilter}
-            options={[
-              { value: "", label: "All Genres" },
-              ...allGenres.map((g) => ({ value: g, label: g })),
-            ]}
-          />
-        )}
-
-        <Select value={runtimeFilter} onChange={applyRuntimeFilter} options={runtimeFilters} />
-      </div>
-
-      {/* Grid view */}
       {view === "grid" ? (
         filtered.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-            {filtered.map((item, i) => (
-              <div key={`${item.id}-${i}`} className="group relative">
-                {item.type === "person" ? (
-                  <Link
-                    href={item.href}
-                    className="group relative block overflow-hidden rounded-lg bg-zinc-900"
-                  >
-                    <div className="relative aspect-[2/3]">
-                      {item.posterUrl ? (
-                        <Image
-                          src={item.posterUrl}
-                          alt={item.title}
-                          fill
-                          className="object-cover transition-transform duration-300 group-hover:scale-105"
-                          sizes="(max-width: 640px) 33vw, 14vw"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center bg-zinc-800 text-2xl text-zinc-700">
-                          👤
-                        </div>
-                      )}
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-2.5 pt-16 pb-2">
-                        <p className="truncate text-xs font-semibold leading-tight text-white">
-                          {item.title}
-                        </p>
-                        <p className="mt-0.5 text-[10px] text-zinc-400">Person</p>
-                      </div>
-                    </div>
-                  </Link>
-                ) : (
-                  <MediaCard
-                    title={item.title}
-                    subtitle={item.year ? String(item.year) : undefined}
-                    href={item.href}
-                    backdropUrl={item.backdropUrl}
-                    posterUrl={item.posterUrl}
-                    rating={item.rating}
-                    mediaType={item.mediaType}
-                    ids={item.ids}
-                    variant="poster"
-                  />
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6">
+            {filtered.map((item, index) => (
+              <div
+                key={`${item.id}-${index}`}
+                className={`group relative rounded-lg transition-all ${
+                  manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
+                }`}
+                onDragOver={(event) => {
+                  if (manageMode && isOwner) event.preventDefault();
+                }}
+                onDragEnter={() => {
+                  if (manageMode && isOwner) setDragOverId(item.id);
+                }}
+                onDragLeave={() => {
+                  if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
+                }}
+                onDrop={() => {
+                  if (draggedId === item.id) return;
+                  handleDrop(item.rank);
+                }}
+              >
+                {showRanks && (
+                  <div className="absolute left-1/2 top-0 z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-[48%] items-center justify-center rounded-full border-2 border-white bg-zinc-900 px-1 text-[11px] font-bold text-white shadow-lg">
+                    {item.rank}
+                  </div>
                 )}
-                {isOwner && (
-                  <button
-                    onClick={() => removeItem(item)}
-                    disabled={removing === item.id}
-                    className="absolute top-1.5 left-1.5 z-10 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full bg-black/70 text-zinc-400 opacity-0 transition-all hover:bg-red-500/80 hover:text-white group-hover:opacity-100 disabled:opacity-50"
-                    title="Remove from list"
-                  >
-                    <svg
-                      className="h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
+
+                {item.type === "person" ? (
+                  <div>
+                    <Link
+                      href={item.href}
+                      className={`group relative block overflow-hidden rounded-lg bg-zinc-900 ${
+                        manageMode && isOwner ? "cursor-grab active:cursor-grabbing" : ""
+                      }`}
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                      <div className="relative aspect-[2/3]">
+                        {item.posterUrl ? (
+                          <Image
+                            src={item.posterUrl}
+                            alt={item.title}
+                            fill
+                            className="object-cover transition-transform duration-300 group-hover:scale-105"
+                            sizes="(max-width: 640px) 33vw, 16vw"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center bg-zinc-800 text-2xl text-zinc-700">
+                            P
+                          </div>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-2.5 pt-16 pb-2">
+                          <p className="truncate text-xs font-semibold leading-tight text-white">
+                            {item.title}
+                          </p>
+                          <p className="mt-0.5 text-[10px] text-zinc-400">Person</p>
+                        </div>
+                      </div>
+                    </Link>
+                  </div>
+                ) : (
+                  <div
+                    className={
+                      manageMode && isOwner ? "cursor-grab active:cursor-grabbing" : undefined
+                    }
+                  >
+                    <MediaCard
+                      title={item.title}
+                      primaryText={item.title}
+                      secondaryText={item.year ? String(item.year) : undefined}
+                      href={item.href}
+                      backdropUrl={item.backdropUrl}
+                      posterUrl={item.posterUrl}
+                      rating={item.rating}
+                      mediaType={item.mediaType}
+                      ids={item.ids}
+                      variant="poster"
+                      showInlineActions
+                      disableHover={manageMode}
+                    />
+                  </div>
+                )}
+
+                {manageMode && isOwner && (
+                  <div
+                    draggable
+                    onDragStart={(event) => beginDrag(event, item.id)}
+                    onDragEnd={() => {
+                      setDraggedId(null);
+                      setDragOverId(null);
+                    }}
+                    className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
+                    aria-label={`Drag ${item.title}`}
+                    title={`Drag ${item.title}`}
+                  />
                 )}
               </div>
             ))}
@@ -354,11 +695,32 @@ export function ListDetailClient({
         <EmptyState />
       ) : (
         <div className="space-y-1">
-          {filtered.map((item, i) => (
+          {filtered.map((item, index) => (
             <div
-              key={`${item.id}-${i}`}
-              className="group flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+              key={`${item.id}-${index}`}
+              className={`group relative flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04] ${
+                manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
+              }`}
+              onDragOver={(event) => {
+                if (manageMode && isOwner) event.preventDefault();
+              }}
+              onDragEnter={() => {
+                if (manageMode && isOwner) setDragOverId(item.id);
+              }}
+              onDragLeave={() => {
+                if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
+              }}
+              onDrop={() => {
+                if (draggedId === item.id) return;
+                handleDrop(item.rank);
+              }}
             >
+              {showRanks && (
+                <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
+                  {item.rank}
+                </div>
+              )}
+
               <Link
                 href={item.href}
                 className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
@@ -373,7 +735,7 @@ export function ListDetailClient({
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center text-xs text-zinc-700">
-                    {item.type === "person" ? "👤" : item.type === "movie" ? "🎬" : "📺"}
+                    {item.type === "person" ? "P" : item.type === "movie" ? "M" : "T"}
                   </div>
                 )}
               </Link>
@@ -384,15 +746,7 @@ export function ListDetailClient({
                 </p>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-500">
                   {item.year && <span>{item.year}</span>}
-                  <span
-                    className={`rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${
-                      item.type === "movie"
-                        ? "bg-blue-500/10 text-blue-400"
-                        : item.type === "show"
-                          ? "bg-purple-500/10 text-purple-400"
-                          : "bg-teal-500/10 text-teal-400"
-                    }`}
-                  >
+                  <span className="rounded px-1 py-0.5 text-[9px] font-semibold uppercase bg-white/5 text-zinc-400">
                     {item.type === "movie" ? "Film" : item.type === "show" ? "TV" : "Person"}
                   </span>
                   {item.genres.length > 0 && (
@@ -402,38 +756,6 @@ export function ListDetailClient({
                   )}
                 </div>
               </Link>
-
-              {item.rating != null && (
-                <div
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                    Math.round(item.rating * 10) >= 70
-                      ? "bg-green-500/10 text-green-400"
-                      : Math.round(item.rating * 10) >= 50
-                        ? "bg-yellow-500/10 text-yellow-400"
-                        : "bg-red-500/10 text-red-400"
-                  }`}
-                >
-                  {Math.round(item.rating * 10)}%
-                </div>
-              )}
-
-              {item.notes && (
-                <span className="shrink-0 text-zinc-600" title={item.notes}>
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
-                    />
-                  </svg>
-                </span>
-              )}
 
               {isOwner && (
                 <button
@@ -453,57 +775,33 @@ export function ListDetailClient({
                   </svg>
                 </button>
               )}
+
+              {manageMode && isOwner && (
+                <div
+                  draggable
+                  onDragStart={(event) => beginDrag(event, item.id)}
+                  onDragEnd={() => {
+                    setDraggedId(null);
+                    setDragOverId(null);
+                  }}
+                  className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
+                  aria-label={`Drag ${item.title}`}
+                  title={`Drag ${item.title}`}
+                />
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-4">
-          <button
-            onClick={() =>
-              navigateWithFilters(
-                sortBy,
-                sortHow,
-                currentPage - 1,
-                genreFilter || undefined,
-                runtimeFilter || undefined,
-              )
-            }
-            disabled={currentPage <= 1}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            ← Previous
-          </button>
-          <span className="text-xs tabular-nums text-zinc-500">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() =>
-              navigateWithFilters(
-                sortBy,
-                sortHow,
-                currentPage + 1,
-                genreFilter || undefined,
-                runtimeFilter || undefined,
-              )
-            }
-            disabled={currentPage >= totalPages}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            Next →
-          </button>
-        </div>
+      {editOpen && (
+        <EditListModal
+          listInfo={listInfo}
+          pending={isSaving}
+          onClose={() => setEditOpen(false)}
+          onSave={saveListSettings}
+        />
       )}
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex items-center justify-center rounded-xl bg-white/[0.02] py-16 ring-1 ring-white/5">
-      <p className="text-sm text-zinc-500">No items found</p>
     </div>
   );
 }

@@ -42,6 +42,8 @@ export interface MediaCardProps {
   title: string;
   subtitle?: string | React.ReactNode;
   meta?: string | React.ReactNode;
+  primaryText?: string;
+  secondaryText?: string;
   href: string;
   showHref?: string;
   backdropUrl: string | null;
@@ -99,6 +101,8 @@ export function MediaCard({
   title,
   subtitle,
   meta,
+  primaryText,
+  secondaryText,
   href,
   showHref,
   backdropUrl,
@@ -270,6 +274,18 @@ export function MediaCard({
   const isTopTag = effectiveSpecialTag && effectiveSpecialTag !== "New Episode";
 
   const ribbonColor = optimisticRating ? getRibbonColor(optimisticRating) : "transparent";
+  const defaultPrimaryText =
+    mediaType !== "movies" && typeof subtitle === "string" ? subtitle : title;
+  const defaultSecondaryText =
+    mediaType !== "movies"
+      ? typeof title === "string"
+        ? title
+        : ""
+      : typeof subtitle === "string"
+        ? subtitle
+        : "";
+  const resolvedPrimaryText = primaryText ?? defaultPrimaryText;
+  const resolvedSecondaryText = secondaryText ?? defaultSecondaryText;
 
   const handleHideCalendarShow = async () => {
     if (!showTitleAction || titleActionLoading) return;
@@ -449,17 +465,19 @@ export function MediaCard({
         <div className="mt-2.5 flex w-full flex-col items-center px-1 pb-1 text-center">
           <Link
             href={href}
+            title={resolvedPrimaryText}
             className={cn(
               "block w-full truncate font-bold leading-tight text-white transition-colors hover:text-red-500",
               isPoster ? "text-[13px]" : "text-[15px]",
             )}
           >
-            {mediaType !== "movies" ? subtitle : title}
+            {resolvedPrimaryText}
           </Link>
-          {mediaType !== "movies" && showHref ? (
+          {mediaType !== "movies" && showHref && !secondaryText ? (
             <div className="relative mt-1 flex w-full items-center justify-center gap-1.5">
               <Link
                 href={showHref}
+                title={resolvedSecondaryText}
                 className={cn(
                   "block max-w-full truncate font-medium leading-tight text-zinc-400 transition-colors hover:text-zinc-200 hover:underline",
                   isPoster ? "text-[11px]" : "text-[13px]",
@@ -514,18 +532,21 @@ export function MediaCard({
             </div>
           ) : (
             <p
+              title={resolvedSecondaryText}
               className={cn(
-                "mt-1 w-full truncate font-medium leading-tight text-zinc-400",
+                "w-full truncate font-medium leading-tight text-zinc-400",
+                isPoster ? "mt-0.5" : "mt-1",
                 isPoster ? "text-[11px]" : "text-[13px]",
               )}
             >
-              {mediaType !== "movies" ? title : subtitle}
+              {resolvedSecondaryText}
             </p>
           )}
           {meta ? (
             <p
               className={cn(
-                "mt-1 w-full truncate font-medium leading-tight text-zinc-500",
+                "w-full truncate font-medium leading-tight text-zinc-500",
+                isPoster ? "mt-0.5" : "mt-1",
                 isPoster ? "text-[11px]" : "text-[13px]",
               )}
             >

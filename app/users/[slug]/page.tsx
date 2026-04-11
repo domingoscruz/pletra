@@ -1,16 +1,29 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { createTraktClient } from "@/lib/trakt";
 import { getCachedShowEpisodeMetadata } from "@/lib/trakt-cache";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getUserProfileData } from "@/lib/metadata";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { MediaCard } from "@/components/dashboard/media-card";
 import { CardGrid } from "@/components/dashboard/card-grid";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getOptionalTraktClient, isCurrentUser } from "@/lib/trakt-server";
 import { Last30DaysChart } from "./last-30-days-chart";
 import { RatingsSummaryChart } from "./ratings-summary-chart";
 
 interface Props {
   params: Promise<{ slug: string }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const profile = await getUserProfileData(slug);
+  const username = profile?.username ?? slug;
+
+  return {
+    title: `${username}'s profile - Pletra`,
+  };
 }
 
 type FavItem = {
@@ -63,6 +76,16 @@ type EpisodeMetadata = {
 
 type RatedItem = {
   rating?: number;
+};
+
+type ViewerMovieMetadata = {
+  watchedMovieIds: Set<number>;
+  movieRatingMap: Map<number, number>;
+};
+
+type ViewerEpisodeMetadata = {
+  watchedEpisodeKeys: Set<string>;
+  episodeRatingMap: Map<number, number>;
 };
 
 const RATING_LABELS = [
@@ -193,6 +216,90 @@ function getEpisodeBadge(item: HistoryItem, metadata?: EpisodeMetadata) {
   return undefined;
 }
 
+async function getViewerMovieMetadata(): Promise<ViewerMovieMetadata> {
+  const client = await getOptionalTraktClient();
+
+  try {
+    const [watchedRes, ratingsRes] = await Promise.all([
+      client.users.watched.movies({ params: { id: "me" } }).catch(() => null),
+      client.users.ratings.movies({ params: { id: "me" } }).catch(() => null),
+    ]);
+
+    const watchedMovieIds = new Set<number>();
+    const movieRatingMap = new Map<number, number>();
+
+    if (watchedRes?.status === 200) {
+      for (const item of watchedRes.body as Array<{ movie?: { ids?: { trakt?: number } } }>) {
+        if (item.movie?.ids?.trakt) {
+          watchedMovieIds.add(item.movie.ids.trakt);
+        }
+      }
+    }
+
+    if (ratingsRes?.status === 200) {
+      for (const rating of ratingsRes.body as Array<{
+        rating?: number;
+        movie?: { ids?: { trakt?: number } };
+      }>) {
+        if (rating.movie?.ids?.trakt && rating.rating) {
+          movieRatingMap.set(rating.movie.ids.trakt, rating.rating);
+        }
+      }
+    }
+
+    return { watchedMovieIds, movieRatingMap };
+  } catch {
+    return { watchedMovieIds: new Set(), movieRatingMap: new Map() };
+  }
+}
+
+async function getViewerEpisodeMetadata(): Promise<ViewerEpisodeMetadata> {
+  const client = await getOptionalTraktClient();
+
+  try {
+    const [watchedRes, ratingsRes] = await Promise.all([
+      client.users.watched.shows({ params: { id: "me" } }).catch(() => null),
+      client.users.ratings.episodes({ params: { id: "me" } }).catch(() => null),
+    ]);
+
+    const watchedEpisodeKeys = new Set<string>();
+    const episodeRatingMap = new Map<number, number>();
+
+    if (watchedRes?.status === 200) {
+      for (const item of watchedRes.body as Array<{
+        show?: { ids?: { trakt?: number } };
+        seasons?: Array<{ number?: number; episodes?: Array<{ number?: number }> }>;
+      }>) {
+        const showTraktId = item.show?.ids?.trakt;
+        if (!showTraktId) continue;
+
+        for (const season of item.seasons ?? []) {
+          for (const episode of season.episodes ?? []) {
+            if (season.number != null && episode.number != null) {
+              watchedEpisodeKeys.add(`${showTraktId}:${season.number}:${episode.number}`);
+            }
+          }
+        }
+      }
+    }
+
+    if (ratingsRes?.status === 200) {
+      for (const rating of ratingsRes.body as Array<{
+        rating?: number;
+        episode?: { ids?: { trakt?: number } };
+      }>) {
+        if (rating.episode?.ids?.trakt && rating.rating) {
+          episodeRatingMap.set(rating.episode.ids.trakt, rating.rating);
+        }
+      }
+    }
+
+    return { watchedEpisodeKeys, episodeRatingMap };
+  } catch {
+    return { watchedEpisodeKeys: new Set(), episodeRatingMap: new Map() };
+  }
+}
+
 async function UserFavorites({ slug, type }: { slug: string; type: "movies" | "shows" }) {
   try {
     const client = createTraktClient();
@@ -226,6 +333,7 @@ async function UserFavorites({ slug, type }: { slug: string; type: "movies" | "s
         title={`Favorite ${type === "movies" ? "Movies" : "Shows"}`}
         defaultRows={1}
         rowSize={6}
+        containerClass="mx-auto max-w-[76rem]"
       >
         {items.map((item, i) => {
           const media = type === "movies" ? item.movie : item.show;
@@ -256,28 +364,29 @@ async function UserFavorites({ slug, type }: { slug: string; type: "movies" | "s
   }
 }
 
-async function UserRecentEpisodes({ slug }: { slug: string }) {
+async function UserRecentEpisodes({ slug, isOwnProfile }: { slug: string; isOwnProfile: boolean }) {
   try {
     const client = createTraktClient();
-    const [historyRes, ratingsRes] = await Promise.all([
+    const [historyRes, ratingsRes, viewerMetadata] = await Promise.all([
       client.users.history.shows({
         params: { id: slug },
         query: { page: 1, limit: 4, extended: "full,images" as any },
       }),
       client.users.ratings.episodes({ params: { id: slug } }).catch(() => null),
+      isOwnProfile ? Promise.resolve(null) : getViewerEpisodeMetadata(),
     ]);
 
     const recent = historyRes.status === 200 ? (historyRes.body as HistoryItem[]) : [];
     if (recent.length === 0) return null;
 
-    const userRatingMap = new Map<number, number>();
+    const profileRatingMap = new Map<number, number>();
     if (ratingsRes?.status === 200) {
       for (const rating of ratingsRes.body as Array<{
         rating?: number;
         episode?: { ids?: { trakt?: number } };
       }>) {
         if (rating.episode?.ids?.trakt && rating.rating) {
-          userRatingMap.set(rating.episode.ids.trakt, rating.rating);
+          profileRatingMap.set(rating.episode.ids.trakt, rating.rating);
         }
       }
     }
@@ -361,6 +470,13 @@ async function UserRecentEpisodes({ slug }: { slug: string }) {
             episode.ids?.trakt ?? 0
           ];
           const releasedAt = metadata?.releasedAt ?? episode.first_aired;
+          const episodeKey = `${show.ids?.trakt ?? 0}:${episode.season ?? 0}:${episode.number ?? 0}`;
+          const viewerRating = episode.ids?.trakt
+            ? viewerMetadata?.episodeRatingMap.get(episode.ids.trakt)
+            : undefined;
+          const profileRating = episode.ids?.trakt
+            ? profileRatingMap.get(episode.ids.trakt)
+            : undefined;
 
           return (
             <MediaCard
@@ -373,15 +489,17 @@ async function UserRecentEpisodes({ slug }: { slug: string }) {
               backdropUrl={imageUrls[index]}
               posterUrl={null}
               rating={metadata?.rating ?? episode.rating}
-              userRating={userRatingMap.get(episode.ids?.trakt ?? 0)}
+              userRating={isOwnProfile ? profileRating : viewerRating}
               mediaType="episodes"
               ids={show.ids ?? {}}
               episodeIds={episode.ids ?? {}}
               releasedAt={releasedAt}
-              watchedAt={item.watched_at}
+              watchedAt={isOwnProfile ? item.watched_at : undefined}
               variant="landscape"
               showInlineActions
-              isWatched
+              isWatched={
+                isOwnProfile ? true : (viewerMetadata?.watchedEpisodeKeys.has(episodeKey) ?? false)
+              }
               specialTag={getEpisodeBadge(item, metadata)}
             />
           );
@@ -396,28 +514,29 @@ async function UserRecentEpisodes({ slug }: { slug: string }) {
   }
 }
 
-async function UserRecentMovies({ slug }: { slug: string }) {
+async function UserRecentMovies({ slug, isOwnProfile }: { slug: string; isOwnProfile: boolean }) {
   try {
     const client = createTraktClient();
-    const [historyRes, ratingsRes] = await Promise.all([
+    const [historyRes, ratingsRes, viewerMetadata] = await Promise.all([
       client.users.history.movies({
         params: { id: slug },
         query: { page: 1, limit: 6, extended: "full" },
       }),
       client.users.ratings.movies({ params: { id: slug } }).catch(() => null),
+      isOwnProfile ? Promise.resolve(null) : getViewerMovieMetadata(),
     ]);
 
     const recent = historyRes.status === 200 ? (historyRes.body as HistoryItem[]) : [];
     if (recent.length === 0) return null;
 
-    const userRatingMap = new Map<number, number>();
+    const profileRatingMap = new Map<number, number>();
     if (ratingsRes?.status === 200) {
       for (const rating of ratingsRes.body as Array<{
         rating?: number;
         movie?: { ids?: { trakt?: number } };
       }>) {
         if (rating.movie?.ids?.trakt && rating.rating) {
-          userRatingMap.set(rating.movie.ids.trakt, rating.rating);
+          profileRatingMap.set(rating.movie.ids.trakt, rating.rating);
         }
       }
     }
@@ -444,6 +563,16 @@ async function UserRecentMovies({ slug }: { slug: string }) {
           const movie = item.movie;
           if (!movie) return null;
 
+          const profileRating = movie.ids?.trakt
+            ? profileRatingMap.get(movie.ids.trakt)
+            : undefined;
+          const viewerRating = movie.ids?.trakt
+            ? viewerMetadata?.movieRatingMap.get(movie.ids.trakt)
+            : undefined;
+          const viewerWatched = movie.ids?.trakt
+            ? viewerMetadata?.watchedMovieIds.has(movie.ids.trakt)
+            : false;
+
           return (
             <MediaCard
               key={`movie-${movie.ids?.trakt}-${item.watched_at}`}
@@ -455,13 +584,13 @@ async function UserRecentMovies({ slug }: { slug: string }) {
               backdropUrl={images[index]?.backdrop ?? null}
               posterUrl={images[index]?.poster ?? null}
               rating={movie.rating}
-              userRating={userRatingMap.get(movie.ids?.trakt ?? 0)}
+              userRating={isOwnProfile ? profileRating : viewerRating}
               mediaType="movies"
               ids={movie.ids ?? {}}
               variant="poster"
               showInlineActions
-              watchedAt={item.watched_at}
-              isWatched
+              watchedAt={isOwnProfile ? item.watched_at : undefined}
+              isWatched={isOwnProfile ? true : Boolean(viewerWatched)}
             />
           );
         })}
@@ -632,7 +761,7 @@ function SectionSkeleton({ title }: { title: string }) {
             ? "mx-auto grid max-w-[76rem] grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4"
             : isRecentMovies
               ? "mx-auto grid max-w-[76rem] grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-              : "grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6"
+              : "mx-auto grid max-w-[76rem] grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6"
         }
       >
         {Array.from({ length: isRecentEpisodes ? 4 : 6 }).map((_, i) => (
@@ -648,15 +777,16 @@ function SectionSkeleton({ title }: { title: string }) {
 
 export default async function UserOverviewPage({ params }: Props) {
   const { slug } = await params;
+  const ownProfile = await isCurrentUser(slug);
 
   return (
     <div className="mx-auto max-w-[84rem] space-y-10">
       <Suspense fallback={<SectionSkeleton title="Recently Watched Episodes" />}>
-        <UserRecentEpisodes slug={slug} />
+        <UserRecentEpisodes slug={slug} isOwnProfile={ownProfile} />
       </Suspense>
 
       <Suspense fallback={<SectionSkeleton title="Recently Watched Movies" />}>
-        <UserRecentMovies slug={slug} />
+        <UserRecentMovies slug={slug} isOwnProfile={ownProfile} />
       </Suspense>
 
       <Suspense

@@ -1,9 +1,24 @@
-import Link from "@/components/ui/link";
+import type { Metadata } from "next";
+import { requestWithPolicy } from "@/lib/api/http";
+import { getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getOptionalTraktClient } from "@/lib/trakt-server";
+import { fetchTmdbImages, fetchTmdbPersonImage } from "@/lib/tmdb";
+import { ListsClient, type ListCardData } from "./lists-client";
 
 interface Props {
   params: Promise<{ slug: string }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const profile = await getUserProfileData(slug);
+  const username = profile?.username ?? slug;
+
+  return {
+    title: `${username}'s lists - Pletra`,
+  };
 }
 
 type ListItem = {
@@ -15,34 +30,189 @@ type ListItem = {
   comment_count?: number;
   sort_by?: string;
   sort_how?: string;
-  created_at?: string;
   updated_at?: string;
   ids?: { trakt?: number; slug?: string };
   user?: { username?: string };
 };
 
+type LikedListItem = {
+  liked_at?: string;
+  list?: ListItem;
+};
+
+type PreviewSourceItem = {
+  type?: "movie" | "show" | "season" | "episode" | "person";
+  listed_at?: string;
+  movie?: {
+    title?: string;
+    ids?: { tmdb?: number; trakt?: number };
+  };
+  show?: {
+    title?: string;
+    ids?: { tmdb?: number; trakt?: number };
+  };
+  season?: {
+    number?: number;
+    ids?: { tmdb?: number; trakt?: number };
+  };
+  episode?: {
+    title?: string;
+    ids?: { tmdb?: number; trakt?: number };
+  };
+  person?: {
+    name?: string;
+    ids?: { tmdb?: number; trakt?: number };
+  };
+};
+
+type PosterPreview = {
+  id: string;
+  posterUrl: string;
+  title: string;
+};
+
+function getPreviewTitle(item: PreviewSourceItem) {
+  if (item.movie?.title) return item.movie.title;
+  if (item.show?.title) return item.show.title;
+  if (item.person?.name) return item.person.name;
+  if (item.episode?.title) return item.episode.title;
+  return "List item";
+}
+
+async function getPosterPreview(
+  item: PreviewSourceItem,
+  index: number,
+): Promise<PosterPreview | null> {
+  try {
+    if (item.type === "person") {
+      const personId = item.person?.ids?.tmdb;
+      if (!personId) return null;
+      const posterUrl = await fetchTmdbPersonImage(personId);
+      return posterUrl
+        ? {
+            id: `person-${item.person?.ids?.trakt ?? personId}-${index}`,
+            posterUrl,
+            title: getPreviewTitle(item),
+          }
+        : null;
+    }
+
+    const tmdbId =
+      item.movie?.ids?.tmdb ??
+      item.show?.ids?.tmdb ??
+      item.episode?.ids?.tmdb ??
+      item.season?.ids?.tmdb;
+    if (!tmdbId) return null;
+
+    const tmdbType = item.movie ? "movie" : "tv";
+    const images = await fetchTmdbImages(tmdbId, tmdbType);
+    const posterUrl = images.poster ?? images.still ?? images.backdrop;
+
+    return posterUrl
+      ? {
+          id: `${item.type ?? tmdbType}-${tmdbId}-${index}`,
+          posterUrl,
+          title: getPreviewTitle(item),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchListPreviewData(
+  ownerSlug: string,
+  listSlug: string,
+): Promise<{ items: PreviewSourceItem[]; totalCount: number }> {
+  const res = await requestWithPolicy(
+    `https://api.trakt.tv/users/${encodeURIComponent(ownerSlug)}/lists/${encodeURIComponent(listSlug)}/items/movie,show,season,episode,person?extended=full&page=1&limit=5`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+        "user-agent": "pletra/1.0",
+      },
+      next: { revalidate: 300 },
+    },
+    {
+      timeoutMs: 10000,
+      maxRetries: 2,
+    },
+  );
+
+  if (!res.ok) {
+    return { items: [], totalCount: 0 };
+  }
+
+  const totalCount = parseInt(res.headers.get("x-pagination-item-count") ?? "0", 10);
+  return {
+    items: (await res.json()) as PreviewSourceItem[],
+    totalCount,
+  };
+}
+
+async function resolveViewerSlug() {
+  try {
+    const authClient = await getOptionalTraktClient();
+    const profileRes = await authClient.users.profile({ params: { id: "me" } });
+    if (profileRes.status === 200) {
+      const profile = profileRes.body as { ids?: { slug?: string } };
+      return profile.ids?.slug ?? null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 export default async function ListsPage({ params }: Props) {
   const { slug } = await params;
-  let lists: ListItem[] = [];
+  let personalLists: ListItem[] = [];
+  let followedLists: LikedListItem[] = [];
   let watchlistMovieCount = 0;
   let watchlistShowCount = 0;
+  let watchlistMovieItems: PreviewSourceItem[] = [];
+  let watchlistShowItems: PreviewSourceItem[] = [];
 
   try {
     const client = createTraktClient();
 
-    const [listsRes, watchlistMoviesRes, watchlistShowsRes] = await Promise.all([
+    const [listsRes, watchlistMoviesRes, watchlistShowsRes, followedRes] = await Promise.all([
       client.users.lists.personal({ params: { id: slug } }),
       client.users.watchlist.movies({
         params: { id: slug, sort: "added" },
-        query: { page: 1, limit: 1 },
+        query: { page: 1, limit: 5, extended: "full" },
       }),
       client.users.watchlist.shows({
         params: { id: slug, sort: "added" },
-        query: { page: 1, limit: 1 },
+        query: { page: 1, limit: 5, extended: "full" },
       }),
+      requestWithPolicy(
+        `https://api.trakt.tv/users/${encodeURIComponent(slug)}/likes/lists?limit=50`,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "trakt-api-version": "2",
+            "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+            "user-agent": "pletra/1.0",
+          },
+          next: { revalidate: 300 },
+        },
+      ).catch(() => null),
     ]);
 
-    lists = listsRes.status === 200 ? (listsRes.body as ListItem[]) : [];
+    personalLists = listsRes.status === 200 ? (listsRes.body as ListItem[]) : [];
+    watchlistMovieItems =
+      watchlistMoviesRes.status === 200
+        ? ((watchlistMoviesRes.body as PreviewSourceItem[]) ?? [])
+        : [];
+    watchlistShowItems =
+      watchlistShowsRes.status === 200
+        ? ((watchlistShowsRes.body as PreviewSourceItem[]) ?? [])
+        : [];
+    followedLists = followedRes?.ok ? (((await followedRes.json()) as LikedListItem[]) ?? []) : [];
 
     watchlistMovieCount = parseInt(
       String(
@@ -66,138 +236,112 @@ export default async function ListsPage({ params }: Props) {
     }
   }
 
-  // Get watchlist total count from headers
+  const viewerSlug = await resolveViewerSlug();
+  const isOwner = viewerSlug?.toLowerCase() === slug.toLowerCase();
+
   const watchlistTotal = watchlistMovieCount + watchlistShowCount;
+  const watchlistPreviewItems = [...watchlistMovieItems, ...watchlistShowItems]
+    .sort((a, b) => new Date(b.listed_at ?? 0).getTime() - new Date(a.listed_at ?? 0).getTime())
+    .slice(0, 5);
 
-  const allLists = lists;
-  const hasWatchlist = watchlistTotal > 0;
+  const watchlistPreviewPosters = (
+    await Promise.all(watchlistPreviewItems.map((item, index) => getPosterPreview(item, index)))
+  ).filter((poster): poster is PosterPreview => Boolean(poster));
 
-  if (allLists.length === 0 && !hasWatchlist) {
-    return (
-      <div className="flex items-center justify-center rounded-xl bg-white/[0.02] py-16 ring-1 ring-white/5">
-        <div className="text-center">
-          <svg
-            className="mx-auto h-8 w-8 text-zinc-700"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-            />
-          </svg>
-          <p className="mt-3 text-sm text-zinc-500">No lists yet</p>
-        </div>
-      </div>
-    );
+  const personalCards = await Promise.all(
+    personalLists.map(async (list, index) => {
+      const listSlug = list.ids?.slug ?? String(list.ids?.trakt ?? index);
+      const previewData = list.ids?.slug
+        ? await fetchListPreviewData(slug, list.ids.slug)
+        : { items: [], totalCount: list.item_count ?? 0 };
+      const previewPosters = (
+        await Promise.all(
+          previewData.items.map((item, previewIndex) => getPosterPreview(item, previewIndex)),
+        )
+      ).filter((poster): poster is PosterPreview => Boolean(poster));
+
+      return {
+        id: String(list.ids?.trakt ?? listSlug),
+        slug: listSlug,
+        href: `/users/${slug}/lists/${listSlug}`,
+        title: list.name ?? "Untitled List",
+        description: list.description?.trim() || "A curated collection from this profile.",
+        privacy: list.privacy ?? "public",
+        itemCount: previewData.totalCount || list.item_count || 0,
+        likes: list.likes ?? 0,
+        comments: list.comment_count ?? 0,
+        updatedAt: list.updated_at,
+        sortBy: list.sort_by,
+        sortHow: list.sort_how,
+        owner: list.user?.username ?? slug,
+        ownerSlug: slug,
+        previewPosters,
+        kind: "personal" as const,
+        editable: isOwner,
+      } satisfies ListCardData;
+    }),
+  );
+
+  const followedCards = await Promise.all(
+    followedLists.map(async (liked, index) => {
+      const list = liked.list;
+      const ownerSlug = list?.user?.username ?? slug;
+      const listSlug = list?.ids?.slug ?? String(list?.ids?.trakt ?? `followed-${index}`);
+      const previewData =
+        list?.ids?.slug && list.user?.username
+          ? await fetchListPreviewData(list.user.username, list.ids.slug)
+          : { items: [], totalCount: list?.item_count ?? 0 };
+      const previewPosters = (
+        await Promise.all(
+          previewData.items.map((item, previewIndex) => getPosterPreview(item, previewIndex)),
+        )
+      ).filter((poster): poster is PosterPreview => Boolean(poster));
+
+      return {
+        id: `followed-${list?.ids?.trakt ?? listSlug}`,
+        slug: listSlug,
+        href: `/users/${ownerSlug}/lists/${listSlug}`,
+        title: list?.name ?? "Untitled List",
+        description: list?.description?.trim() || "A followed collection.",
+        privacy: list?.privacy ?? "public",
+        itemCount: previewData.totalCount || list?.item_count || 0,
+        likes: list?.likes ?? 0,
+        comments: list?.comment_count ?? 0,
+        updatedAt: list?.updated_at ?? liked.liked_at,
+        sortBy: list?.sort_by,
+        sortHow: list?.sort_how,
+        owner: list?.user?.username ?? ownerSlug,
+        ownerSlug,
+        previewPosters,
+        kind: "followed" as const,
+        editable: false,
+      } satisfies ListCardData;
+    }),
+  );
+
+  const cards: ListCardData[] = [];
+  if (watchlistTotal > 0) {
+    cards.push({
+      id: "watchlist",
+      slug: "watchlist",
+      href: `/users/${slug}/lists/watchlist`,
+      title: "Watchlist",
+      description: "Movies, shows, seasons, and episodes queued for later.",
+      privacy: "personal",
+      itemCount: watchlistTotal,
+      likes: 0,
+      comments: 0,
+      sortBy: "added",
+      sortHow: "desc",
+      owner: slug,
+      ownerSlug: slug,
+      previewPosters: watchlistPreviewPosters,
+      kind: "watchlist",
+      editable: false,
+    });
   }
 
-  return (
-    <div className="space-y-2">
-      {/* Watchlist (built-in) */}
-      {hasWatchlist && (
-        <Link
-          href={`/users/${slug}/lists/watchlist`}
-          className="group flex items-center justify-between rounded-lg px-4 py-4 transition-colors hover:bg-white/[0.04]"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <svg className="h-4 w-4 shrink-0 text-accent" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-              </svg>
-              <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
-                Watchlist
-              </p>
-            </div>
-            <p className="mt-0.5 ml-6 text-xs text-zinc-500">Movies and shows to watch</p>
-          </div>
+  cards.push(...personalCards, ...followedCards);
 
-          <div className="flex shrink-0 items-center gap-4 pl-4">
-            <div className="text-right">
-              <p className="text-sm font-bold tabular-nums text-zinc-300">{watchlistTotal}</p>
-              <p className="text-[9px] uppercase text-zinc-600">items</p>
-            </div>
-            <svg
-              className="h-4 w-4 text-zinc-700 transition-colors group-hover:text-zinc-400"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </div>
-        </Link>
-      )}
-
-      {/* Personal lists */}
-      {allLists.map((list) => (
-        <Link
-          key={list.ids?.trakt}
-          href={`/users/${slug}/lists/${list.ids?.slug}`}
-          className="group flex items-center justify-between rounded-lg px-4 py-4 transition-colors hover:bg-white/[0.04]"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
-                {list.name}
-              </p>
-              {list.privacy === "private" && (
-                <svg
-                  className="h-3 w-3 shrink-0 text-zinc-600"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-                  />
-                </svg>
-              )}
-            </div>
-            {list.description && (
-              <p className="mt-0.5 truncate text-xs text-zinc-500">{list.description}</p>
-            )}
-          </div>
-
-          <div className="flex shrink-0 items-center gap-4 pl-4">
-            <div className="text-right">
-              <p className="text-sm font-bold tabular-nums text-zinc-300">{list.item_count ?? 0}</p>
-              <p className="text-[9px] uppercase text-zinc-600">items</p>
-            </div>
-            {(list.likes ?? 0) > 0 && (
-              <div className="text-right">
-                <p className="text-sm font-bold tabular-nums text-zinc-300">{list.likes}</p>
-                <p className="text-[9px] uppercase text-zinc-600">likes</p>
-              </div>
-            )}
-            {list.updated_at && (
-              <span className="hidden text-[11px] text-zinc-600 lg:inline">
-                Updated{" "}
-                {new Date(list.updated_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
-            )}
-            <svg
-              className="h-4 w-4 text-zinc-700 transition-colors group-hover:text-zinc-400"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </div>
-        </Link>
-      ))}
-    </div>
-  );
+  return <ListsClient initialCards={cards} slug={slug} isOwner={isOwner} />;
 }

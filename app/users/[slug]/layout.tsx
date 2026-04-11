@@ -228,7 +228,9 @@ export default async function UserProfileLayout({ params, children }: Props) {
           {!user.private ? (
             <div className="mt-8">
               <ProfileTabs slug={slug} isOwnProfile={isOwnProfile} />
-              <div className="mt-4">{children}</div>
+              <div className="mt-4 rounded-2xl bg-black/40 p-3 backdrop-blur-md md:p-5">
+                {children}
+              </div>
             </div>
           ) : (
             <div className="mt-12 flex items-center justify-center rounded-xl bg-white/[0.03] py-16 ring-1 ring-white/5">

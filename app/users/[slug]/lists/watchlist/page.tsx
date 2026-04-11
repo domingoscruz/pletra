@@ -1,6 +1,8 @@
-import Link from "@/components/ui/link";
+import type { Metadata } from "next";
+import { getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { getOptionalTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { WatchlistClient } from "./watchlist-client";
 
@@ -10,10 +12,19 @@ interface Props {
     type?: string;
     page?: string;
     sort?: string;
+    order?: string;
     genre?: string;
-    runtime?: string;
     q?: string;
   }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const profile = await getUserProfileData(slug);
+  const userName = profile?.username ?? slug;
+  return {
+    title: `${userName}'s watchlist - Pletra`,
+  };
 }
 
 type WatchlistItem = {
@@ -44,34 +55,41 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
   const type = (sp.type as "all" | "movies" | "shows") || "all";
-  const page = parseInt(sp.page ?? "1", 10);
-  const sortBy = sp.sort ?? "added";
+  const sortBy = sp.sort ?? "rank";
+  const sortHow = sp.order === "desc" ? "desc" : "asc";
   const genreFilter = sp.genre ?? "";
-  const runtimeFilter = sp.runtime ?? "";
   const searchQuery = sp.q ?? "";
-  const limit = 42;
+  const limit = 100;
 
   let items: WatchlistItem[] = [];
-  let totalPages = 1;
+  let totalItems = 0;
+  let isOwner = false;
 
   // Build query with filters
   const buildQuery = (extra?: Record<string, unknown>) => {
-    const q: Record<string, unknown> = { page, limit, extended: "full", ...extra };
+    const q: Record<string, unknown> = {
+      limit,
+      extended: "full",
+      sort_how: sortHow,
+      ...extra,
+    };
     if (genreFilter) q.genres = genreFilter;
-    if (runtimeFilter) q.runtimes = runtimeFilter;
     return q;
   };
 
   try {
     const client = createTraktClient();
 
-    if (type === "movies" || type === "all") {
-      const res = await client.users.watchlist.movies({
-        params: { id: slug, sort: sortBy },
-        query: buildQuery() as Parameters<typeof client.users.watchlist.movies>[0]["query"],
-      });
-      if (res.status === 200) {
-        items = (res.body as WatchlistItem[]).map((i) => ({ ...i, type: "movie" }));
+    if (type === "all") {
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages) {
+        const res = await client.users.watchlist.all({
+          params: { id: slug, sort: sortBy },
+          query: buildQuery({ page }) as Parameters<typeof client.users.watchlist.all>[0]["query"],
+        });
+        if (res.status !== 200) break;
+        items.push(...(res.body as WatchlistItem[]));
         totalPages = parseInt(
           String(
             (res as { headers?: { get?: (k: string) => string } }).headers?.get?.(
@@ -80,40 +98,86 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
           ),
           10,
         );
+        totalItems = parseInt(
+          String(
+            (res as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-item-count",
+            ) ?? String(items.length),
+          ),
+          10,
+        );
+        page += 1;
+      }
+    } else if (type === "movies") {
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages) {
+        const res = await client.users.watchlist.movies({
+          params: { id: slug, sort: sortBy },
+          query: buildQuery({ page }) as Parameters<
+            typeof client.users.watchlist.movies
+          >[0]["query"],
+        });
+        if (res.status !== 200) break;
+        items.push(...(res.body as WatchlistItem[]).map((i) => ({ ...i, type: "movie" })));
+        totalPages = parseInt(
+          String(
+            (res as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-page-count",
+            ) ?? "1",
+          ),
+          10,
+        );
+        totalItems = parseInt(
+          String(
+            (res as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-item-count",
+            ) ?? String(items.length),
+          ),
+          10,
+        );
+        page += 1;
       }
     }
 
-    if (type === "shows" || type === "all") {
-      const showRes = await client.users.watchlist.shows({
-        params: { id: slug, sort: sortBy },
-        query: buildQuery() as Parameters<typeof client.users.watchlist.shows>[0]["query"],
-      });
-      if (showRes.status === 200) {
-        const shows = (showRes.body as WatchlistItem[]).map((i) => ({ ...i, type: "show" }));
-        if (type === "all") {
-          items = [...items, ...shows].sort(
-            (a, b) => new Date(b.listed_at ?? 0).getTime() - new Date(a.listed_at ?? 0).getTime(),
-          );
-          const showTotalPages = parseInt(
-            String(
-              (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-                "x-pagination-page-count",
-              ) ?? "1",
-            ),
-            10,
-          );
-          totalPages = Math.max(totalPages, showTotalPages);
-        } else {
-          items = shows;
-          totalPages = parseInt(
-            String(
-              (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-                "x-pagination-page-count",
-              ) ?? "1",
-            ),
-            10,
-          );
-        }
+    if (type === "shows") {
+      let page = 1;
+      let totalPages = 1;
+      while (page <= totalPages) {
+        const showRes = await client.users.watchlist.shows({
+          params: { id: slug, sort: sortBy },
+          query: buildQuery({ page }) as Parameters<
+            typeof client.users.watchlist.shows
+          >[0]["query"],
+        });
+        if (showRes.status !== 200) break;
+        items.push(...(showRes.body as WatchlistItem[]).map((i) => ({ ...i, type: "show" })));
+        totalPages = parseInt(
+          String(
+            (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-page-count",
+            ) ?? "1",
+          ),
+          10,
+        );
+        totalItems = parseInt(
+          String(
+            (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
+              "x-pagination-item-count",
+            ) ?? String(items.length),
+          ),
+          10,
+        );
+        page += 1;
+      }
+    }
+
+    const authClient = await getOptionalTraktClient();
+    if (authClient) {
+      const profileRes = await authClient.users.profile({ params: { id: "me" } });
+      if (profileRes.status === 200) {
+        const profile = profileRes.body as { ids?: { slug?: string } };
+        isOwner = profile.ids?.slug === slug;
       }
     }
   } catch (error) {
@@ -156,6 +220,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
 
   const serialized = items.map((item, i) => ({
     id: item.id ?? item.rank ?? i,
+    rank: i + 1,
     listedAt: item.listed_at ?? "",
     type: item.type ?? (item.movie ? "movie" : "show"),
     title: item.movie?.title ?? item.show?.title ?? "Unknown",
@@ -170,39 +235,25 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
     genres: item.movie?.genres ?? item.show?.genres ?? [],
   }));
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <Link
-          href={`/users/${slug}/lists`}
-          className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          All Lists
-        </Link>
-        <h2 className="text-xl font-bold text-zinc-100">Watchlist</h2>
-      </div>
+  const updatedAt =
+    items
+      .map((item) => item.listed_at)
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
 
-      <WatchlistClient
-        items={serialized}
-        slug={slug}
-        currentType={type}
-        currentPage={page}
-        totalPages={totalPages}
-        activeSort={sortBy}
-        activeGenre={genreFilter}
-        activeRuntime={runtimeFilter}
-        activeSearch={searchQuery}
-        allGenres={allGenres}
-      />
-    </div>
+  return (
+    <WatchlistClient
+      items={serialized}
+      slug={slug}
+      currentType={type}
+      activeSort={sortBy}
+      activeOrder={sortHow}
+      activeGenre={genreFilter}
+      activeSearch={searchQuery}
+      allGenres={allGenres}
+      totalItems={totalItems || items.length}
+      updatedAt={updatedAt}
+      isOwner={isOwner}
+    />
   );
 }

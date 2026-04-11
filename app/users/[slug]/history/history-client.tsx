@@ -5,14 +5,16 @@ import Image from "next/image";
 import Link from "@/components/ui/link";
 import { ViewToggle } from "@/components/ui/view-toggle";
 import { Select } from "@/components/ui/select";
-import { MediaCard } from "@/components/dashboard/media-card";
+import { getRibbonColor, MediaCard } from "@/components/dashboard/media-card";
 import { RatingInput } from "@/components/media/rating-input";
 import { useSettings } from "@/lib/settings";
 import { useNavigate } from "@/lib/use-navigate";
 
 type HistoryEntry = {
   id: number;
+  historyId?: number;
   watched_at: string;
+  timeLabel: string;
   type: "movie" | "show";
   title: string;
   year?: number;
@@ -20,11 +22,15 @@ type HistoryEntry = {
   rating?: number;
   userRating?: number;
   href: string;
+  showHref?: string;
   subtitle?: string;
   posterUrl: string | null;
   backdropUrl: string | null;
   mediaType: "movies" | "episodes";
   ids: Record<string, unknown>;
+  episodeIds?: Record<string, unknown>;
+  watchedAt?: string;
+  isWatched: boolean;
 };
 
 interface HistoryClientProps {
@@ -48,9 +54,37 @@ const typeFilters = [
 const sortOptions = [
   { value: "newest", label: "Newest First" },
   { value: "oldest", label: "Oldest First" },
-  { value: "title", label: "Title A–Z" },
+  { value: "title", label: "Title A-Z" },
   { value: "rating", label: "Highest Rated" },
 ];
+
+function formatDuration(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+
+  if (hours <= 0) return `${mins}m`;
+  return `${hours}h ${mins}m`;
+}
+
+function formatDayHeading(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function RatingRibbonChip({ rating }: { rating: number }) {
+  return (
+    <div
+      className="shrink-0 rounded-sm px-2 py-1 text-[10px] font-black tabular-nums text-white shadow-md ring-1 ring-black/10"
+      style={{ backgroundColor: getRibbonColor(rating) }}
+    >
+      {Math.round(rating * 10)}%
+    </div>
+  );
+}
 
 export function HistoryClient({
   items,
@@ -97,39 +131,37 @@ export function HistoryClient({
     }, 400);
   }
 
-  // Group items by date (list view only)
   const grouped = useMemo(() => {
-    const groups: { label: string; items: typeof items }[] = [];
-    let currentLabel = "";
+    const groups: Array<{
+      key: string;
+      label: string;
+      totalRuntime: number;
+      items: HistoryEntry[];
+    }> = [];
+    let currentKey = "";
 
     for (const item of items) {
-      const date = new Date(item.watched_at);
-      const label = date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-      if (label !== currentLabel) {
-        currentLabel = label;
-        groups.push({ label, items: [] });
+      const key = item.watched_at.slice(0, 10);
+      if (key !== currentKey) {
+        currentKey = key;
+        groups.push({
+          key,
+          label: formatDayHeading(item.watched_at),
+          totalRuntime: 0,
+          items: [],
+        });
       }
-      groups[groups.length - 1].items.push(item);
+
+      const group = groups[groups.length - 1];
+      group.items.push(item);
+      group.totalRuntime += item.runtime ?? 0;
     }
+
     return groups;
   }, [items]);
 
-  function formatTimeAgo(dateStr: string) {
-    const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-    if (days < 1) return "Today";
-    if (days === 1) return "Yesterday";
-    if (days < 7) return `${days}d ago`;
-    if (days < 30) return `${Math.floor(days / 7)}w ago`;
-    return "";
-  }
-
   return (
     <div className={`space-y-6 ${isPending ? "opacity-60 transition-opacity" : ""}`}>
-      {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/5">
           {typeFilters.map((f) => (
@@ -149,13 +181,13 @@ export function HistoryClient({
           ))}
         </div>
 
-        <Select
-          value={activeSort}
-          onChange={(v) => navigate({ sort: v, page: 1 })}
-          options={sortOptions}
-        />
-
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+          <Select
+            value={activeSort}
+            onChange={(v) => navigate({ sort: v, page: 1 })}
+            options={sortOptions}
+            className="z-[120]"
+          />
           <ViewToggle view={view} onChange={setView} />
           <div className="relative">
             <svg
@@ -182,48 +214,82 @@ export function HistoryClient({
         </div>
       </div>
 
-      {/* Grid view */}
-      {view === "grid" ? (
-        items.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-            {items.map((item, i) => (
-              <MediaCard
-                key={`${item.id}-${item.watched_at}-${i}`}
-                title={item.title}
-                // Use time ago as subtitle to replace missing timestamp prop
-                subtitle={item.subtitle || formatTimeAgo(item.watched_at)}
-                href={item.href}
-                backdropUrl={item.backdropUrl}
-                posterUrl={item.posterUrl}
-                rating={item.rating}
-                userRating={item.userRating}
-                mediaType={item.mediaType}
-                ids={item.ids}
-                variant="poster"
-              />
-            ))}
-          </div>
-        )
-      ) : grouped.length === 0 ? (
+      {grouped.length === 0 ? (
         <EmptyState />
-      ) : (
-        <div className="space-y-6">
+      ) : view === "grid" ? (
+        <div className="space-y-9">
           {grouped.map((group) => (
-            <div key={group.label}>
-              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
-                {group.label}
-              </h3>
-              <div className="space-y-1">
+            <section key={group.key} className="space-y-4">
+              <div className="flex items-center gap-3 border-b border-white/8 pb-2">
+                <div className="flex h-7 w-7 items-center justify-center text-zinc-200">
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    viewBox="0 0 24 24"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-black tracking-tight text-white">{group.label}</h3>
+                <div className="h-px flex-1 bg-white/8" />
+                <span className="text-sm tabular-nums text-zinc-400">
+                  {formatDuration(group.totalRuntime)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {group.items.map((item, i) => (
+                  <MediaCard
+                    key={`${item.id}-${item.watched_at}-${i}`}
+                    title={item.title}
+                    subtitle={item.subtitle ?? item.timeLabel}
+                    meta={item.timeLabel}
+                    href={item.href}
+                    showHref={item.showHref}
+                    backdropUrl={item.backdropUrl}
+                    posterUrl={item.posterUrl}
+                    rating={item.rating}
+                    userRating={item.userRating}
+                    mediaType={item.mediaType}
+                    ids={item.ids}
+                    episodeIds={item.episodeIds}
+                    historyId={item.historyId}
+                    watchedAt={item.watchedAt}
+                    isWatched={item.isWatched}
+                    variant="poster"
+                    showInlineActions
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-7">
+          {grouped.map((group) => (
+            <section key={group.key}>
+              <div className="mb-3 flex items-center gap-3 border-b border-white/8 pb-2">
+                <h3 className="text-[12px] font-black uppercase tracking-[0.18em] text-zinc-300">
+                  {group.label}
+                </h3>
+                <div className="h-px flex-1 bg-white/8" />
+                <span className="text-[11px] tabular-nums text-zinc-500">
+                  {formatDuration(group.totalRuntime)}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
                 {group.items.map((item, i) => (
                   <div
                     key={`${item.id}-${item.watched_at}-${i}`}
-                    className="group flex items-center gap-4 rounded-lg px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+                    className="group flex items-center gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
                   >
                     <Link
                       href={item.href}
-                      className="relative h-14 w-10 shrink-0 overflow-hidden rounded bg-zinc-800"
+                      className="relative h-16 w-11 shrink-0 overflow-hidden rounded-md bg-zinc-800"
                     >
                       {item.posterUrl ? (
                         <Image
@@ -231,62 +297,65 @@ export function HistoryClient({
                           alt={item.title}
                           fill
                           className="object-cover"
-                          sizes="40px"
+                          sizes="44px"
                         />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-zinc-700">
-                          {item.type === "movie" ? "🎬" : "📺"}
+                          {item.type === "movie" ? "M" : "TV"}
                         </div>
                       )}
                     </Link>
 
-                    <Link href={item.href} className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-zinc-200 group-hover:text-white">
-                        {item.title}
-                      </p>
-                      <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                        {item.subtitle && <span className="truncate">{item.subtitle}</span>}
-                        {!item.subtitle && item.year && <span>{item.year}</span>}
+                    <div className="min-w-0 flex-1">
+                      <Link href={item.href} className="block min-w-0">
+                        <p className="truncate text-sm font-semibold text-zinc-100 group-hover:text-white">
+                          {item.subtitle ?? item.title}
+                        </p>
+                      </Link>
+                      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
+                        {item.subtitle && item.showHref ? (
+                          <Link
+                            href={item.showHref}
+                            className="truncate text-zinc-400 transition-colors hover:text-zinc-100 hover:underline"
+                          >
+                            {item.title}
+                          </Link>
+                        ) : (
+                          <span className="truncate">{item.subtitle ? item.title : item.year}</span>
+                        )}
+                        <span className="text-zinc-700">•</span>
+                        <span>{item.timeLabel}</span>
                       </div>
-                    </Link>
+                    </div>
 
-                    {item.rating != null && (
-                      <div
-                        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${Math.round(item.rating * 10) >= 70 ? "bg-green-500/10 text-green-400" : Math.round(item.rating * 10) >= 50 ? "bg-yellow-500/10 text-yellow-400" : "bg-red-500/10 text-red-400"}`}
-                      >
-                        {Math.round(item.rating * 10)}%
-                      </div>
-                    )}
+                    {item.rating != null && <RatingRibbonChip rating={item.rating} />}
 
-                    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="hidden shrink-0 sm:block">
                       <RatingInput
                         mediaType={item.mediaType}
-                        ids={item.ids}
+                        ids={item.episodeIds ?? item.ids}
                         currentRating={item.userRating}
+                        icon="heart"
                       />
                     </div>
 
-                    <span className="hidden shrink-0 text-[11px] text-zinc-600 sm:inline">
-                      {new Date(item.watched_at).toLocaleTimeString("en-US", {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </span>
-
                     <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${item.type === "movie" ? "bg-blue-500/10 text-blue-400" : "bg-purple-500/10 text-purple-400"}`}
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${
+                        item.type === "movie"
+                          ? "bg-blue-500/10 text-blue-400"
+                          : "bg-purple-500/10 text-purple-400"
+                      }`}
                     >
                       {item.type === "movie" ? "Film" : "TV"}
                     </span>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           ))}
         </div>
       )}
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-4">
           <button

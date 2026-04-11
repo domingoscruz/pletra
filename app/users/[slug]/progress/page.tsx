@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Image from "next/image";
+import { getUserProfileData } from "@/lib/metadata";
 import { getAuthenticatedTraktClient, isCurrentUser } from "@/lib/trakt-server";
 import { proxyImageUrl } from "@/lib/image-proxy";
 import { fetchTmdbImages } from "@/lib/tmdb";
@@ -15,6 +17,16 @@ interface ProgressPageProps {
     q?: string;
     page?: string;
   }>;
+}
+
+export async function generateMetadata({ params }: ProgressPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const profile = await getUserProfileData(slug);
+  const username = profile?.username ?? slug;
+
+  return {
+    title: `${username}'s progress - Pletra`,
+  };
 }
 
 export type ProgressShowItem = {

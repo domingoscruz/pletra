@@ -1,5 +1,5 @@
-import Link from "@/components/ui/link";
 import { requestWithPolicy } from "@/lib/api/http";
+import type { Metadata } from "next";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { getOptionalTraktClient } from "@/lib/trakt-server";
@@ -13,8 +13,31 @@ interface Props {
     order?: string;
     page?: string;
     genres?: string;
-    runtimes?: string;
   }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug, listSlug } = await params;
+
+  try {
+    const client = createTraktClient();
+    const summaryRes = await client.users.lists.list.summary({
+      params: { id: slug, list_id: listSlug },
+    });
+
+    if (summaryRes.status === 200) {
+      const list = summaryRes.body as ListSummary;
+      const listName = list.name ?? "List";
+      const userName = list.user?.username ?? slug;
+      return {
+        title: `${listName}, a list by ${userName} - Pletra`,
+      };
+    }
+  } catch {}
+
+  return {
+    title: `${listSlug}, a list by ${slug} - Pletra`,
+  };
 }
 
 type ListSummary = {
@@ -23,6 +46,8 @@ type ListSummary = {
   privacy?: string;
   item_count?: number;
   likes?: number;
+  allow_comments?: boolean;
+  display_numbers?: boolean;
   sort_by?: string;
   sort_how?: string;
   created_at?: string;
@@ -53,6 +78,16 @@ type ListedItem = {
     runtime?: number;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
+  season?: {
+    number?: number;
+    ids?: { slug?: string; tmdb?: number; trakt?: number };
+  };
+  episode?: {
+    title?: string;
+    season?: number;
+    number?: number;
+    ids?: { slug?: string; tmdb?: number; trakt?: number };
+  };
   person?: {
     name?: string;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
@@ -64,10 +99,8 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   const sp = await searchParams;
   const sortBy = sp.sort ?? "rank";
   const sortHow = sp.order ?? "asc";
-  const page = parseInt(sp.page ?? "1", 10);
   const genres = sp.genres;
-  const runtimes = sp.runtimes;
-  const limit = 42; // 7 * 6
+  const limit = 100;
 
   // Get list summary
   let summaryRes: { status: number; body?: unknown } = { status: 500 };
@@ -94,40 +127,45 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   }
 
   // Build query params for direct Trakt API fetch (includes person type)
-  const queryParams = new URLSearchParams({
-    extended: "full",
-    sort_by: sortBy,
-    sort_how: sortHow,
-    page: String(page),
-    limit: String(limit),
-  });
-  if (genres) queryParams.set("genres", genres);
-  if (runtimes) queryParams.set("runtimes", runtimes);
-
   // Fetch list items directly from Trakt API to include person type
   let items: ListedItem[] = [];
-  let totalPages = 1;
 
   try {
-    const itemsRes = await requestWithPolicy(
-      `https://api.trakt.tv/users/${encodeURIComponent(slug)}/lists/${encodeURIComponent(listSlug)}/items/movie,show,person?${queryParams.toString()}`,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "trakt-api-version": "2",
-          "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
-          "user-agent": "pletra/1.0",
-        },
-        next: { revalidate: 300 },
-      },
-      {
-        timeoutMs: 10000,
-        maxRetries: 2,
-      },
-    );
+    let page = 1;
+    let totalPages = 1;
 
-    items = itemsRes.ok ? await itemsRes.json() : [];
-    totalPages = parseInt(itemsRes.headers.get("x-pagination-page-count") ?? "1", 10);
+    while (page <= totalPages) {
+      const queryParams = new URLSearchParams({
+        extended: "full",
+        sort_by: sortBy,
+        sort_how: sortHow,
+        page: String(page),
+        limit: String(limit),
+      });
+      if (genres) queryParams.set("genres", genres);
+
+      const itemsRes = await requestWithPolicy(
+        `https://api.trakt.tv/users/${encodeURIComponent(slug)}/lists/${encodeURIComponent(listSlug)}/items/movie,show,season,episode,person?${queryParams.toString()}`,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "trakt-api-version": "2",
+            "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+            "user-agent": "pletra/1.0",
+          },
+          next: { revalidate: 300 },
+        },
+        {
+          timeoutMs: 10000,
+          maxRetries: 2,
+        },
+      );
+
+      if (!itemsRes.ok) break;
+      items.push(...((await itemsRes.json()) as ListedItem[]));
+      totalPages = parseInt(itemsRes.headers.get("x-pagination-page-count") ?? "1", 10);
+      page += 1;
+    }
   } catch (error) {
     if (!isTraktExpectedError(error)) {
       console.error("[List Detail Page] Failed to load list items:", error);
@@ -160,7 +198,11 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         const poster = await fetchTmdbPersonImage(tmdbId).catch(() => null);
         return { poster, backdrop: null };
       }
-      const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
+      const tmdbId =
+        item.movie?.ids?.tmdb ??
+        item.show?.ids?.tmdb ??
+        item.episode?.ids?.tmdb ??
+        item.season?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
         ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
@@ -186,7 +228,13 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
     listedAt: item.listed_at ?? "",
     notes: item.notes ?? null,
     type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),
-    title: item.movie?.title ?? item.show?.title ?? item.person?.name ?? "Unknown",
+    title:
+      item.movie?.title ??
+      item.show?.title ??
+      item.episode?.title ??
+      (item.season?.number ? `Season ${item.season.number}` : undefined) ??
+      item.person?.name ??
+      "Unknown",
     year: item.movie?.year ?? item.show?.year,
     rating: item.movie?.rating ?? item.show?.rating,
     runtime: item.movie?.runtime ?? item.show?.runtime,
@@ -195,7 +243,11 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         ? `/people/${item.person?.ids?.slug ?? item.person?.ids?.trakt}`
         : item.movie
           ? `/movies/${item.movie.ids?.slug}`
-          : `/shows/${item.show?.ids?.slug}`,
+          : item.show
+            ? `/shows/${item.show?.ids?.slug}`
+            : item.episode?.ids?.slug
+              ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
+              : `/shows/${item.show?.ids?.slug}/seasons/${item.season?.number}`,
     posterUrl: images[i]?.poster ?? null,
     backdropUrl: images[i]?.backdrop ?? null,
     mediaType: item.movie
@@ -203,66 +255,27 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
       : item.show
         ? ("shows" as const)
         : ("movies" as const),
-    ids: item.movie?.ids ?? item.show?.ids ?? item.person?.ids ?? {},
+    ids:
+      item.movie?.ids ??
+      item.show?.ids ??
+      item.episode?.ids ??
+      item.season?.ids ??
+      item.person?.ids ??
+      {},
     genres: item.movie?.genres ?? item.show?.genres ?? [],
   }));
 
   return (
-    <div className="space-y-6">
-      {/* Back + list header */}
-      <div>
-        <Link
-          href={`/users/${slug}/lists`}
-          className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          All Lists
-        </Link>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-zinc-100">{listInfo.name}</h2>
-            {listInfo.description && (
-              <p className="mt-1 text-sm text-zinc-400">{listInfo.description}</p>
-            )}
-            <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
-              <span>{listInfo.item_count ?? 0} items</span>
-              {(listInfo.likes ?? 0) > 0 && <span>{listInfo.likes} likes</span>}
-              {listInfo.updated_at && (
-                <span>
-                  Updated{" "}
-                  {new Date(listInfo.updated_at).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <ListDetailClient
-        items={serialized}
-        slug={slug}
-        listSlug={listSlug}
-        sortBy={sortBy}
-        sortHow={sortHow}
-        currentPage={page}
-        totalPages={totalPages}
-        isOwner={isOwner}
-        allGenres={allGenres}
-        activeGenres={genres ?? ""}
-        activeRuntimes={runtimes ?? ""}
-      />
-    </div>
+    <ListDetailClient
+      items={serialized}
+      slug={slug}
+      listSlug={listSlug}
+      sortBy={sortBy}
+      sortHow={sortHow}
+      isOwner={isOwner}
+      allGenres={allGenres}
+      activeGenres={genres ?? ""}
+      listInfo={listInfo}
+    />
   );
 }
