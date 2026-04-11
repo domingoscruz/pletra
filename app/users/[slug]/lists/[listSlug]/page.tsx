@@ -222,48 +222,52 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   }
   const allGenres = [...genreSet].sort();
 
-  const serialized = items.map((item, i) => ({
-    id: item.id ?? item.rank ?? i,
-    rank: item.rank ?? i + 1,
-    listedAt: item.listed_at ?? "",
-    notes: item.notes ?? null,
-    type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),
-    title:
-      item.movie?.title ??
-      item.show?.title ??
-      item.episode?.title ??
-      (item.season?.number ? `Season ${item.season.number}` : undefined) ??
-      item.person?.name ??
-      "Unknown",
-    year: item.movie?.year ?? item.show?.year,
-    rating: item.movie?.rating ?? item.show?.rating,
-    runtime: item.movie?.runtime ?? item.show?.runtime,
-    href:
-      item.type === "person"
-        ? `/people/${item.person?.ids?.slug ?? item.person?.ids?.trakt}`
-        : item.movie
-          ? `/movies/${item.movie.ids?.slug}`
-          : item.show
-            ? `/shows/${item.show?.ids?.slug}`
-            : item.episode?.ids?.slug
-              ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
-              : `/shows/${item.show?.ids?.slug}/seasons/${item.season?.number}`,
-    posterUrl: images[i]?.poster ?? null,
-    backdropUrl: images[i]?.backdrop ?? null,
-    mediaType: item.movie
-      ? ("movies" as const)
-      : item.show
-        ? ("shows" as const)
-        : ("movies" as const),
-    ids:
-      item.movie?.ids ??
-      item.show?.ids ??
-      item.episode?.ids ??
-      item.season?.ids ??
-      item.person?.ids ??
-      {},
-    genres: item.movie?.genres ?? item.show?.genres ?? [],
-  }));
+  const serialized = items.map((item, i) => {
+    const showSlug = item.show?.ids?.slug;
+
+    return {
+      id: item.id ?? item.rank ?? i,
+      rank: item.rank ?? i + 1,
+      listedAt: item.listed_at ?? "",
+      notes: item.notes ?? null,
+      type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),
+      title:
+        item.movie?.title ??
+        item.show?.title ??
+        item.episode?.title ??
+        (item.season?.number ? `Season ${item.season.number}` : undefined) ??
+        item.person?.name ??
+        "Unknown",
+      year: item.movie?.year ?? item.show?.year,
+      rating: item.movie?.rating ?? item.show?.rating,
+      runtime: item.movie?.runtime ?? item.show?.runtime,
+      href:
+        item.type === "person"
+          ? `/people/${item.person?.ids?.slug ?? item.person?.ids?.trakt}`
+          : item.movie
+            ? `/movies/${item.movie.ids?.slug}`
+            : item.show
+              ? `/shows/${showSlug}`
+              : item.episode?.ids?.slug
+                ? `/shows/${showSlug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
+                : `/shows/${showSlug}/seasons/${item.season?.number}`,
+      posterUrl: images[i]?.poster ?? null,
+      backdropUrl: images[i]?.backdrop ?? null,
+      mediaType: item.movie
+        ? ("movies" as const)
+        : item.show
+          ? ("shows" as const)
+          : ("movies" as const),
+      ids:
+        item.movie?.ids ??
+        item.show?.ids ??
+        item.episode?.ids ??
+        item.season?.ids ??
+        item.person?.ids ??
+        {},
+      genres: item.movie?.genres ?? item.show?.genres ?? [],
+    };
+  });
 
   return (
     <ListDetailClient
