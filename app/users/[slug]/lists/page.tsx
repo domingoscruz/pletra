@@ -343,5 +343,5 @@ export default async function ListsPage({ params }: Props) {
 
   cards.push(...personalCards, ...followedCards);
 
-  return <ListsClient initialCards={cards} slug={slug} isOwner={isOwner} />;
+  return <ListsClient initialCards={cards} isOwner={isOwner} />;
 }
