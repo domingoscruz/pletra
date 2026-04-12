@@ -2,6 +2,7 @@ import { requestWithPolicy } from "@/lib/api/http";
 import type { Metadata } from "next";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { extractTraktImage } from "@/lib/trakt-images";
 import { getOptionalTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages, fetchTmdbPersonImage } from "@/lib/tmdb";
 import { ListDetailClient } from "./list-detail-client";
