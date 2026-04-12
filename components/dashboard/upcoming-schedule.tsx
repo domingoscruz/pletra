@@ -197,7 +197,9 @@ async function getCachedUpcomingScheduleItems(userKey: string) {
             const epLabel = `${ep.season}x${String(ep.number).padStart(2, "0")}`;
 
             let statusBadge: string | undefined;
-            if (ep.number === 1) {
+            if (ep.episode_type === "mid_season_finale") {
+              statusBadge = "Mid Season Finale";
+            } else if (ep.number === 1) {
               statusBadge = ep.season === 1 ? "Series Premiere" : "Season Premiere";
             }
 

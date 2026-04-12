@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${displayName}'s ratings - Pletra`,
+    title: `${displayName}'s ratings - RePletra`,
   };
 }
 

@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils";
 
 let sharedWatchlistPromise: Promise<number[]> | null = null;
 let sharedPersonalListsPromise: Promise<PersonalListOption[]> | null = null;
+const sharedPersonalListItemPromises: Partial<
+  Record<"movies" | "shows" | "episodes", Promise<number[]>>
+> = {};
 
 type PersonalListOption = {
   name: string;
@@ -46,6 +49,12 @@ export const fetchWatchlistIds = () => {
   return sharedWatchlistPromise;
 };
 
+const LIST_TYPE_SEGMENTS: Record<"movies" | "shows" | "episodes", "movie" | "show" | "episode"> = {
+  movies: "movie",
+  shows: "show",
+  episodes: "episode",
+};
+
 const fetchPersonalLists = () => {
   if (!sharedPersonalListsPromise) {
     sharedPersonalListsPromise = fetchTraktRouteJson<
@@ -72,6 +81,58 @@ const fetchPersonalLists = () => {
   }
 
   return sharedPersonalListsPromise;
+};
+
+const extractPersonalListItemTraktId = (item: any) => {
+  const id = item?.movie?.ids?.trakt || item?.show?.ids?.trakt || item?.episode?.ids?.trakt;
+  return typeof id === "number" ? id : null;
+};
+
+export const fetchPersonalListItemIds = (mediaType: "movies" | "shows" | "episodes") => {
+  const existingPromise = sharedPersonalListItemPromises[mediaType];
+  if (existingPromise) return existingPromise;
+
+  const promise = fetchPersonalLists()
+    .then(async (lists) => {
+      const ids = new Set<number>();
+      const itemType = LIST_TYPE_SEGMENTS[mediaType];
+
+      await Promise.all(
+        lists.map(async (list) => {
+          let page = 1;
+          let totalPages = 1;
+
+          while (page <= totalPages) {
+            const response = await fetch(
+              `/api/trakt/users/me/lists/${encodeURIComponent(list.slug)}/items/${itemType}?page=${page}&limit=100`,
+              {
+                cache: "no-store",
+              },
+            );
+
+            if (!response.ok) break;
+
+            const data = (await response.json()) as any[];
+            for (const entry of data ?? []) {
+              const traktId = extractPersonalListItemTraktId(entry);
+              if (traktId) ids.add(traktId);
+            }
+
+            totalPages = parseInt(response.headers.get("x-pagination-page-count") ?? "1", 10);
+            page += 1;
+          }
+        }),
+      );
+
+      return Array.from(ids);
+    })
+    .catch(() => {
+      delete sharedPersonalListItemPromises[mediaType];
+      return [];
+    });
+
+  sharedPersonalListItemPromises[mediaType] = promise;
+  return promise;
 };
 
 export const TRAKT_RATINGS: Record<number, string> = {
@@ -171,6 +232,7 @@ interface CardActionsProps {
     specialTag?:
       | "Series Premiere"
       | "Season Premiere"
+      | "Mid Season Finale"
       | "Season Finale"
       | "Series Finale"
       | "New Episode";
@@ -221,6 +283,7 @@ export function CardActions({
 
   const [watched, setWatched] = useState(isWatched);
   const [inWatchlist, setInWatchlist] = useState(isInWatchlist);
+  const [inPersonalLists, setInPersonalLists] = useState(false);
   const [availableLists, setAvailableLists] = useState<PersonalListOption[]>([]);
   const [selectedListSlugs, setSelectedListSlugs] = useState<string[]>([]);
   const [listsLoading, setListsLoading] = useState(false);
@@ -241,6 +304,7 @@ export function CardActions({
 
   const targetIds = episodeIds ? episodeIds : ids;
   const traktId = targetIds?.trakt ? Number(targetIds.trakt) : null;
+  const listMembershipType = episodeIds ? "episodes" : mediaType;
   const activeRatingColor = getRibbonColor(localRating);
   const listPayloadKey = episodeIds ? "episodes" : mediaType;
 
@@ -318,12 +382,21 @@ export function CardActions({
   }, [showOtherDatePicker, selectedDate]);
 
   useEffect(() => {
-    if (traktId) {
-      fetchWatchlistIds().then((fetchedIds) => {
-        if (fetchedIds.includes(traktId)) setInWatchlist(true);
-      });
-    }
-  }, [traktId]);
+    let isMounted = true;
+    if (!traktId) return;
+
+    Promise.all([fetchWatchlistIds(), fetchPersonalListItemIds(listMembershipType)]).then(
+      ([watchlistIds, personalListIds]) => {
+        if (!isMounted) return;
+        setInWatchlist(isInWatchlist || watchlistIds.includes(traktId));
+        setInPersonalLists(personalListIds.includes(traktId));
+      },
+    );
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isInWatchlist, listMembershipType, traktId]);
 
   useEffect(() => {
     setWatched(isWatched);
@@ -431,6 +504,7 @@ export function CardActions({
     if (addedCount > 0 && failedCount === 0) {
       setToastMessage(addedCount === 1 ? "Added to 1 list!" : `Added to ${addedCount} lists!`);
       setSelectedListSlugs([]);
+      setInPersonalLists(true);
       setShowListOptions(false);
     } else if (addedCount > 0) {
       setToastMessage(`Added to ${addedCount} lists, ${failedCount} failed.`);
@@ -1310,7 +1384,7 @@ export function CardActions({
           title="Open watchlist actions"
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all border-l border-white/10",
-            inWatchlist
+            inWatchlist || inPersonalLists
               ? "bg-[#23a5dd] text-white"
               : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
           )}

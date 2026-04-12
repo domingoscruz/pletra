@@ -68,7 +68,7 @@ async function getFriendHistory(
     return res.status === 200 ? (res.body as HistoryItem[]) : [];
   } catch (error) {
     if (!isTraktExpectedError(error)) {
-      console.error(`[Pletra] API Error for ${username}:`, error);
+      console.error(`[RePletra] API Error for ${username}:`, error);
     }
     return [];
   }
@@ -147,7 +147,7 @@ async function fetchUserMetadata() {
     return { movieIds, showData, epRatings, movieRatings };
   } catch (error) {
     if (!isTraktExpectedError(error)) {
-      console.error("[Pletra] Metadata Fetch Error:", error);
+      console.error("[RePletra] Metadata Fetch Error:", error);
     }
     return { movieIds: [], showData: {}, epRatings: {}, movieRatings: {} };
   }
@@ -176,7 +176,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
             })
             .catch((error) => {
               if (!isTraktExpectedError(error)) {
-                console.error("[Pletra] Failed to fetch following:", error);
+                console.error("[RePletra] Failed to fetch following:", error);
               }
               return { status: 403, body: [] };
             }),
@@ -343,7 +343,7 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
     return { status: "ok", items };
   } catch (error) {
     const expected = isTraktExpectedError(error);
-    console[expected ? "warn" : "error"]("[Pletra] Friend Activity Payload Error:", error);
+    console[expected ? "warn" : "error"]("[RePletra] Friend Activity Payload Error:", error);
 
     return {
       status: "error",

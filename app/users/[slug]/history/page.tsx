@@ -3,6 +3,7 @@ import { getUserDisplayName, getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { extractTraktImage } from "@/lib/trakt-images";
+import { getCachedShowEpisodeMetadata } from "@/lib/trakt-cache";
 import { getOptionalTraktClient, isCurrentUser } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { HistoryClient } from "./history-client";
@@ -24,7 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${displayName}'s history - Pletra`,
+    title: `${displayName}'s history - RePletra`,
   };
 }
 
@@ -70,6 +71,45 @@ type ViewerEpisodeMetadata = {
   watchedEpisodeKeys: Set<string>;
   episodeRatingMap: Map<number, number>;
 };
+
+type EpisodeMetadata = {
+  releasedAt?: string;
+  rating?: number;
+  episodeType?: string;
+  totalEpisodesInSeason: number;
+  isLastSeason: boolean;
+};
+
+function getEpisodeSpecialTag(item: HistoryItem, metadata?: EpisodeMetadata) {
+  const season = item.episode?.season;
+  const number = item.episode?.number;
+
+  if (!metadata || !season || !number) {
+    return undefined;
+  }
+
+  if (season === 1 && number === 1) {
+    return "Series Premiere" as const;
+  }
+
+  if (metadata.episodeType === "mid_season_finale") {
+    return "Mid Season Finale" as const;
+  }
+
+  if (number === 1) {
+    return "Season Premiere" as const;
+  }
+
+  if (metadata.isLastSeason && number === metadata.totalEpisodesInSeason) {
+    return "Series Finale" as const;
+  }
+
+  if (number === metadata.totalEpisodesInSeason) {
+    return "Season Finale" as const;
+  }
+
+  return undefined;
+}
 
 type Last30DaysSummary = {
   totalWatchTime: string;
@@ -518,6 +558,23 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     }
   });
 
+  const uniqueShowSlugs = Array.from(
+    new Set(items.map((item) => item.show?.ids?.slug).filter(Boolean)),
+  );
+
+  const metadataEntries = await Promise.all(
+    uniqueShowSlugs.map(async (showSlug) => [
+      showSlug,
+      await getCachedShowEpisodeMetadata(showSlug as string).catch(() => null),
+    ]),
+  );
+
+  const episodeMetadataByShow = new Map(
+    metadataEntries.filter((entry): entry is [string, Record<number, EpisodeMetadata>] =>
+      Boolean(entry[0] && entry[1]),
+    ),
+  );
+
   const images = await Promise.all(
     items.map(async (item) => {
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
@@ -571,55 +628,63 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     }),
   );
 
-  const serializedItems = items.map((item, i) => ({
-    id: item.id ?? i,
-    historyId: item.id,
-    watched_at: item.watched_at ?? "",
-    timeLabel: new Date(item.watched_at ?? "").toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    }),
-    type: item.movie ? ("movie" as const) : ("show" as const),
-    title: item.movie?.title ?? item.show?.title ?? "Unknown",
-    year: item.movie?.year ?? item.show?.year,
-    runtime: item.movie?.runtime ?? item.episode?.runtime,
-    rating: item.movie?.rating ?? item.episode?.rating,
-    userRating: ownProfile
-      ? profileRatingsMap.get((item.movie?.ids?.trakt ?? item.episode?.ids?.trakt) as number)
-      : item.movie?.ids?.trakt
-        ? viewerMovieMetadata?.movieRatingMap.get(item.movie.ids.trakt)
-        : item.episode?.ids?.trakt
-          ? viewerEpisodeMetadata?.episodeRatingMap.get(item.episode.ids.trakt)
+  const serializedItems = items.map((item, i) => {
+    const episodeMetadata =
+      item.episode?.ids?.trakt != null
+        ? episodeMetadataByShow.get(item.show?.ids?.slug ?? "")?.[item.episode.ids.trakt]
+        : undefined;
+
+    return {
+      id: item.id ?? i,
+      historyId: item.id,
+      watched_at: item.watched_at ?? "",
+      timeLabel: new Date(item.watched_at ?? "").toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      type: item.movie ? ("movie" as const) : ("show" as const),
+      title: item.movie?.title ?? item.show?.title ?? "Unknown",
+      year: item.movie?.year ?? item.show?.year,
+      runtime: item.movie?.runtime ?? item.episode?.runtime,
+      rating: item.movie?.rating ?? item.episode?.rating,
+      userRating: ownProfile
+        ? profileRatingsMap.get((item.movie?.ids?.trakt ?? item.episode?.ids?.trakt) as number)
+        : item.movie?.ids?.trakt
+          ? viewerMovieMetadata?.movieRatingMap.get(item.movie.ids.trakt)
+          : item.episode?.ids?.trakt
+            ? viewerEpisodeMetadata?.episodeRatingMap.get(item.episode.ids.trakt)
+            : undefined,
+      href: item.movie
+        ? `/movies/${item.movie.ids?.slug}`
+        : item.episode
+          ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
+          : `/shows/${item.show?.ids?.slug}`,
+      showHref: item.episode ? `/shows/${item.show?.ids?.slug}` : undefined,
+      subtitle: item.movie
+        ? undefined
+        : item.episode
+          ? `${item.episode.season}x${String(item.episode.number ?? 0).padStart(2, "0")} ${item.episode.title ?? ""}`.trim()
           : undefined,
-    href: item.movie
-      ? `/movies/${item.movie.ids?.slug}`
-      : item.episode
-        ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
-        : `/shows/${item.show?.ids?.slug}`,
-    showHref: item.episode ? `/shows/${item.show?.ids?.slug}` : undefined,
-    subtitle: item.movie
-      ? undefined
-      : item.episode
-        ? `${item.episode.season}x${String(item.episode.number ?? 0).padStart(2, "0")} ${item.episode.title ?? ""}`.trim()
-        : undefined,
-    posterUrl: images[i]?.poster ?? null,
-    backdropUrl: images[i]?.backdrop ?? null,
-    mediaType: item.movie ? ("movies" as const) : ("episodes" as const),
-    ids: item.movie?.ids ?? item.show?.ids ?? {},
-    episodeIds: item.episode?.ids ?? undefined,
-    watchedAt: ownProfile ? (item.watched_at ?? "") : undefined,
-    isWatched: ownProfile
-      ? true
-      : item.movie?.ids?.trakt
-        ? (viewerMovieMetadata?.watchedMovieIds.has(item.movie.ids.trakt) ?? false)
-        : item.show?.ids?.trakt != null &&
-            item.episode?.season != null &&
-            item.episode?.number != null
-          ? (viewerEpisodeMetadata?.watchedEpisodeKeys.has(
-              `${item.show.ids.trakt}:${item.episode.season}:${item.episode.number}`,
-            ) ?? false)
-          : false,
-  }));
+      posterUrl: images[i]?.poster ?? null,
+      backdropUrl: images[i]?.backdrop ?? null,
+      mediaType: item.movie ? ("movies" as const) : ("episodes" as const),
+      ids: item.movie?.ids ?? item.show?.ids ?? {},
+      episodeIds: item.episode?.ids ?? undefined,
+      specialTag: getEpisodeSpecialTag(item, episodeMetadata),
+      watchedAt: ownProfile ? (item.watched_at ?? "") : undefined,
+      isWatched: ownProfile
+        ? true
+        : item.movie?.ids?.trakt
+          ? (viewerMovieMetadata?.watchedMovieIds.has(item.movie.ids.trakt) ?? false)
+          : item.show?.ids?.trakt != null &&
+              item.episode?.season != null &&
+              item.episode?.number != null
+            ? (viewerEpisodeMetadata?.watchedEpisodeKeys.has(
+                `${item.show.ids.trakt}:${item.episode.season}:${item.episode.number}`,
+              ) ?? false)
+            : false,
+    };
+  });
 
   const last30Days = await getLast30DaysSummary(slug, dayFilter || undefined);
   const availableDayKeys = Array.from(

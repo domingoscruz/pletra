@@ -1,9 +1,14 @@
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { ProfileBackdrop } from "@/components/dashboard/profile-backdrop";
 import { DashboardSectionShell } from "@/components/dashboard/dashboard-section-shell";
+
+export const metadata: Metadata = {
+  title: "Dashboard - RePletra",
+};
 
 /**
  * Skeleton component for the profile backdrop area

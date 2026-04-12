@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: ProgressPageProps): Promise<M
   const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${displayName}'s progress - Pletra`,
+    title: `${displayName}'s progress - RePletra`,
   };
 }
 
@@ -75,6 +75,7 @@ export type ProgressShowItem = {
       lastWatchedAt: string | null;
       runtime: number;
       firstAired: string | null;
+      episodeType?: string;
     }[];
   }[];
   nextEpisode: {
@@ -84,6 +85,7 @@ export type ProgressShowItem = {
     traktId?: number;
     imageUrl: string | null;
     releasedAt: string | null;
+    isMidSeasonFinale?: boolean;
     isSeasonFinale?: boolean;
     isSeriesFinale?: boolean;
   } | null;
@@ -233,6 +235,7 @@ function findNextEpisodeFromLastWatched(
           releasedAt: episode.firstAired,
           rawEpisode: null,
           rating: episode.rating,
+          episodeType: episode.episodeType,
         };
       }
     }
@@ -327,9 +330,11 @@ async function getCachedProgressShowDetails(
               traktId: progress.next_episode.ids?.trakt,
               releasedAt: progress.next_episode.first_aired ?? null,
               rating: progress.next_episode.rating,
+              episodeType: progress.next_episode.episode_type,
               rawEpisode: progress.next_episode,
             }
           : null;
+        let isMidSeasonFinale = false;
         let isSeasonFinale = false;
         let isSeriesFinale = false;
 
@@ -368,6 +373,8 @@ async function getCachedProgressShowDetails(
                   title: episode.title ?? "",
                   traktId: episode.ids?.trakt,
                   rating: typeof episode.rating === "number" ? episode.rating : undefined,
+                  episodeType:
+                    typeof episode.episode_type === "string" ? episode.episode_type : undefined,
                   watched,
                   plays,
                   lastWatchedAt:
@@ -408,6 +415,41 @@ async function getCachedProgressShowDetails(
           calculatedNextEp = localNextEpisode;
         }
 
+        if (
+          calculatedNextEp &&
+          !calculatedNextEp.episodeType &&
+          calculatedNextEp.season > 0 &&
+          calculatedNextEp.number > 0
+        ) {
+          const nextEpisodeSummaryRes = await client.shows.episode.summary({
+            params: {
+              id: showSlug,
+              season: calculatedNextEp.season,
+              episode: calculatedNextEp.number,
+            },
+            query: { extended: "full" },
+          });
+
+          if (nextEpisodeSummaryRes.status === 200) {
+            const nextEpisodeSummary = nextEpisodeSummaryRes.body as any;
+            calculatedNextEp = {
+              ...calculatedNextEp,
+              title: nextEpisodeSummary.title ?? calculatedNextEp.title,
+              traktId: nextEpisodeSummary.ids?.trakt ?? calculatedNextEp.traktId,
+              releasedAt: nextEpisodeSummary.first_aired ?? calculatedNextEp.releasedAt,
+              rating:
+                typeof nextEpisodeSummary.rating === "number"
+                  ? nextEpisodeSummary.rating
+                  : calculatedNextEp.rating,
+              episodeType:
+                typeof nextEpisodeSummary.episode_type === "string"
+                  ? nextEpisodeSummary.episode_type
+                  : calculatedNextEp.episodeType,
+              rawEpisode: nextEpisodeSummary,
+            };
+          }
+        }
+
         const aggregatedTotals = aggregateSeasonTotals(seasons);
         const totalAired = aggregatedTotals.aired || progress?.aired || 0;
         const completed = aggregatedTotals.completed || progress?.completed || 0;
@@ -423,6 +465,30 @@ async function getCachedProgressShowDetails(
             : Math.max(0, totalAired - completed) * runtime;
         const isComplete = totalAired > 0 && completed >= totalAired;
 
+        if (calculatedNextEp) {
+          const nextSeason = seasons.find((season) => season.season === calculatedNextEp?.season);
+          const lastSeasonNumber = seasons[seasons.length - 1]?.season;
+          const lastEpisodeNumberInSeason =
+            nextSeason?.episodes[nextSeason.episodes.length - 1]?.number;
+          const isLastSeason =
+            typeof lastSeasonNumber === "number" && calculatedNextEp.season === lastSeasonNumber;
+          const isLastEpisodeOfSeason =
+            typeof lastEpisodeNumberInSeason === "number" &&
+            calculatedNextEp.number === lastEpisodeNumberInSeason;
+
+          if (calculatedNextEp.episodeType === "series_finale") {
+            isSeriesFinale = true;
+          } else if (calculatedNextEp.episodeType === "mid_season_finale") {
+            isMidSeasonFinale = true;
+          } else if (calculatedNextEp.episodeType === "season_finale") {
+            isSeriesFinale = isLastSeason && showStatus === "ended";
+            isSeasonFinale = !isSeriesFinale;
+          } else if (isLastEpisodeOfSeason) {
+            isSeriesFinale = isLastSeason && showStatus === "ended";
+            isSeasonFinale = !isSeriesFinale;
+          }
+        }
+
         if (isComplete) {
           const nextAirDate = calculatedNextEp?.releasedAt
             ? new Date(calculatedNextEp.releasedAt)
@@ -432,6 +498,7 @@ async function getCachedProgressShowDetails(
 
           if (!hasScheduledFutureEpisode) {
             calculatedNextEp = null;
+            isMidSeasonFinale = false;
             isSeasonFinale = false;
             isSeriesFinale = false;
           }
@@ -517,6 +584,7 @@ async function getCachedProgressShowDetails(
                 traktId: calculatedNextEp.traktId,
                 imageUrl: proxyImageUrl(epImageUrl),
                 releasedAt: calculatedNextEp.releasedAt,
+                isMidSeasonFinale,
                 isSeasonFinale,
                 isSeriesFinale,
               }
@@ -723,9 +791,9 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
     const backdropImage = items.length > 0 ? items[0].backdropUrl || items[0].posterUrl : null;
 
     return (
-      <main className="relative bg-black">
+      <div className="relative">
         {backdropImage && (
-          <div className="mt-4 rounded-2xl bg-black/40 p-3 backdrop-blur-md md:p-5">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]">
             <Image
               src={backdropImage}
               alt="Backdrop"
@@ -733,26 +801,24 @@ export default async function ProgressPage({ params, searchParams }: ProgressPag
               priority
               className="object-cover opacity-20 blur-3xl scale-110"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-zinc-950/80 to-zinc-950 rounded-2xl" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-zinc-950/80 to-zinc-950" />
           </div>
         )}
 
-        <div className="relative z-10 mx-auto max-w-[112.5rem] px-0 pb-4 pt-1 md:pb-6 md:pt-2">
-          <div className="min-h-[calc(100dvh-3.25rem)] overflow-hidden rounded-[1.75rem] border border-white/8 bg-black/40 p-3 backdrop-blur-md md:min-h-[calc(100dvh-3.5rem)] md:p-5">
-            <ProgressClient
-              slug={slug}
-              items={items}
-              activeSort={activeSort}
-              activeFilter={activeFilter}
-              activeSearch={activeSearch}
-              activeBarMode={activeBarMode}
-              currentPage={safeCurrentPage}
-              totalPages={totalPages}
-              totalItems={totalItems}
-            />
-          </div>
+        <div className="relative z-10">
+          <ProgressClient
+            slug={slug}
+            items={items}
+            activeSort={activeSort}
+            activeFilter={activeFilter}
+            activeSearch={activeSearch}
+            activeBarMode={activeBarMode}
+            currentPage={safeCurrentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+          />
         </div>
-      </main>
+      </div>
     );
   } catch (error) {
     if (!isTraktExpectedError(error)) {

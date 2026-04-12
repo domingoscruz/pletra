@@ -26,8 +26,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const { person, image } = data;
   return {
-    title: `${person.name} — Pletra`,
-    description: person.biography?.slice(0, 200) ?? `${person.name} on Pletra`,
+    title: `${person.name} — RePletra`,
+    description: person.biography?.slice(0, 200) ?? `${person.name} on RePletra`,
     openGraph: {
       title: person.name,
       description: person.biography?.slice(0, 200),

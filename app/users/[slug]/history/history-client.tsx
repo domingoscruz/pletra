@@ -30,6 +30,12 @@ type HistoryEntry = {
   mediaType: "movies" | "episodes";
   ids: Record<string, unknown>;
   episodeIds?: Record<string, unknown>;
+  specialTag?:
+    | "Series Premiere"
+    | "Season Premiere"
+    | "Mid Season Finale"
+    | "Season Finale"
+    | "Series Finale";
   watchedAt?: string;
   isWatched: boolean;
 };
@@ -423,6 +429,7 @@ export function HistoryClient({
                     mediaType={item.mediaType}
                     ids={item.ids}
                     episodeIds={item.episodeIds}
+                    specialTag={item.specialTag}
                     historyId={item.historyId}
                     watchedAt={item.watchedAt}
                     isWatched={item.isWatched}

@@ -89,7 +89,7 @@ export function createTraktClient(
         headers.set("trakt-api-version", "2");
         headers.set("trakt-api-key", clientId || "");
         headers.set("Content-Type", "application/json");
-        headers.set("User-Agent", "Pletra/1.0 (Next.js Managed)");
+        headers.set("User-Agent", "RePletra/1.0 (Next.js Managed)");
 
         if (token) {
           headers.set("Authorization", `Bearer ${token}`);

@@ -45,6 +45,7 @@ function extractTraktImage(
 interface EpisodeMetadata {
   releasedAt?: string;
   rating?: number;
+  episodeType?: string;
   totalEpisodesInSeason: number;
   isLastSeason: boolean;
 }
@@ -208,10 +209,12 @@ async function getCachedRecentActivityItems(userKey: string) {
                 let specialTag: any = undefined;
                 if (isEpisode && metadata) {
                   const { season, number } = item.episode;
-                  const { totalEpisodesInSeason, isLastSeason } = metadata;
+                  const { totalEpisodesInSeason, isLastSeason, episodeType } = metadata;
 
                   if (season === 1 && number === 1) {
                     specialTag = "Series Premiere";
+                  } else if (episodeType === "mid_season_finale") {
+                    specialTag = "Mid Season Finale";
                   } else if (number === 1) {
                     specialTag = "Season Premiere";
                   } else if (isLastSeason && number === totalEpisodesInSeason) {
@@ -261,7 +264,7 @@ async function getCachedRecentActivityItems(userKey: string) {
             );
           } catch (error) {
             if (!isTraktExpectedError(error)) {
-              console.error("[Pletra] Recent Activity Error:", error);
+              console.error("[RePletra] Recent Activity Error:", error);
             }
             throw error;
           }
@@ -295,7 +298,7 @@ export async function getRecentActivitySectionPayload(): Promise<RecentActivityS
     return { status: "ok", items: items as any[] };
   } catch (error) {
     const expected = isTraktExpectedError(error);
-    console[expected ? "warn" : "error"]("[Pletra] Recent Activity Payload Error:", error);
+    console[expected ? "warn" : "error"]("[RePletra] Recent Activity Payload Error:", error);
 
     return {
       status: "error",

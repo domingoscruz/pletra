@@ -33,6 +33,7 @@ export const RIBBON_COLORS: Record<number, string> = {
 export const SPECIAL_TAG_COLORS: Record<string, string> = {
   "Series Premiere": "bg-[#27B7F5]",
   "Season Premiere": "bg-[#45b449]",
+  "Mid Season Finale": "bg-[#2444bf]",
   "Season Finale": "bg-[#9810fa]",
   "Series Finale": "bg-[#ef4444]",
   "New Episode": "bg-[#9810fa]",
@@ -65,6 +66,7 @@ export interface MediaCardProps {
   specialTag?:
     | "Series Premiere"
     | "Season Premiere"
+    | "Mid Season Finale"
     | "Season Finale"
     | "Series Finale"
     | "New Episode";
@@ -84,6 +86,7 @@ export interface MediaCardProps {
     onSuccess?: () => void;
   };
   note?: string | null;
+  imageFooterOverlay?: React.ReactNode;
 }
 
 /**
@@ -96,7 +99,7 @@ export const getRibbonColor = (val: number): string => {
 };
 
 /**
- * MediaCard component for the Pletra project.
+ * MediaCard component for the RePletra project.
  * Displays media items with custom ribbons, badges, and interactive actions.
  */
 export function MediaCard({
@@ -136,6 +139,7 @@ export function MediaCard({
   squareBottom = false,
   showTitleAction,
   note,
+  imageFooterOverlay,
 }: MediaCardProps) {
   const router = useRouter();
   const isPoster = variant === "poster";
@@ -166,8 +170,7 @@ export function MediaCard({
   const [isHovered, setIsHovered] = useState(false);
   const [isTimeBadgeHovered, setIsTimeBadgeHovered] = useState(false);
   const [timeBadgePosition, setTimeBadgePosition] = useState({ top: 0, left: 0 });
-  const [isNoteHovered, setIsNoteHovered] = useState(false);
-  const [noteTooltipPos, setNoteTooltipPos] = useState({ top: 0, left: 0 });
+  const [showNoteDialog, setShowNoteDialog] = useState(false);
   const [showTitleActionMenu, setShowTitleActionMenu] = useState(false);
   const [titleActionMenuPos, setTitleActionMenuPos] = useState({ top: 0, left: 0 });
   const [titleActionLoading, setTitleActionLoading] = useState(false);
@@ -177,7 +180,6 @@ export function MediaCard({
   const [barMidpoint, setBarMidpoint] = useState({ x: 0, y: 0 });
   const barRef = useRef<HTMLDivElement>(null);
   const timeBadgeRef = useRef<HTMLDivElement>(null);
-  const noteButtonRef = useRef<HTMLButtonElement>(null);
   const titleActionRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -396,39 +398,6 @@ export function MediaCard({
               </div>
             )}
 
-            {note ? (
-              <button
-                ref={noteButtonRef}
-                type="button"
-                onMouseEnter={() => {
-                  if (!noteButtonRef.current) return;
-                  const rect = noteButtonRef.current.getBoundingClientRect();
-                  setNoteTooltipPos({
-                    top: rect.top - 10,
-                    left: rect.left + rect.width / 2,
-                  });
-                  setIsNoteHovered(true);
-                }}
-                onMouseLeave={() => setIsNoteHovered(false)}
-                className="absolute bottom-2 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm"
-              >
-                <span>Read Notes</span>
-                <svg
-                  className="h-3 w-3 text-zinc-200"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.8}
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M6.75 3.75h10.5A2.25 2.25 0 0119.5 6v12a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6a2.25 2.25 0 012.25-2.25z"
-                  />
-                </svg>
-              </button>
-            ) : null}
-
             {mounted && showInlineActions && optimisticRating && optimisticRating > 0 && (
               <div
                 className="absolute top-0 right-0 z-50 h-0 w-0 pointer-events-none drop-shadow-md"
@@ -460,6 +429,40 @@ export function MediaCard({
             )}
           </div>
         </Link>
+        {(note || imageFooterOverlay) && (
+          <div className="pointer-events-none absolute inset-x-2 bottom-2 z-[55] flex flex-col items-center gap-1.5">
+            {note ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShowNoteDialog(true);
+                }}
+                className="pointer-events-auto inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm"
+              >
+                <span>Read Notes</span>
+                <svg
+                  className="h-3 w-3 text-zinc-200"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M6.75 3.75h10.5A2.25 2.25 0 0119.5 6v12a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6a2.25 2.25 0 012.25-2.25z"
+                  />
+                </svg>
+              </button>
+            ) : null}
+
+            {imageFooterOverlay ? (
+              <div className="pointer-events-auto">{imageFooterOverlay}</div>
+            ) : null}
+          </div>
+        )}
         {airedCount > 0 && (
           <div
             ref={barRef}
@@ -640,21 +643,37 @@ export function MediaCard({
           document.body,
         )}
 
-      {isNoteHovered &&
+      {showNoteDialog &&
         note &&
         mounted &&
         createPortal(
-          <div
-            className="pointer-events-none fixed z-[11000] -translate-x-1/2"
-            style={{
-              top: `${noteTooltipPos.top}px`,
-              left: `${noteTooltipPos.left}px`,
-              transform: "translateY(-100%)",
-            }}
-          >
-            <div className="relative max-w-[22rem] rounded bg-zinc-900 px-3 py-2 text-[12px] leading-5 text-white shadow-2xl ring-1 ring-white/10">
-              {note}
-              <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+          <div className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold italic text-zinc-100">Notes</h2>
+                  <p className="mt-1 text-sm text-zinc-500">{resolvedPrimaryText}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNoteDialog(false)}
+                  className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mt-5 max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 whitespace-pre-wrap text-zinc-200">
+                {note}
+              </div>
             </div>
           </div>,
           document.body,

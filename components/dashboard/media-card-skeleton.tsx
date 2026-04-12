@@ -1,5 +1,5 @@
 /**
- * Pletra Media Card Skeleton
+ * RePletra Media Card Skeleton
  *
  * This file provides skeleton components to prevent Layout Shift (CLS).
  * The CardGridSkeleton is optimized to handle both horizontal carousels

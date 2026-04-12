@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     : `${epLabel} — ${showData.show.title}`;
 
   return {
-    title: `${title} — Pletra`,
+    title: `${title} — RePletra`,
     description: ep.overview?.slice(0, 200) ?? `${showData.show.title} ${epLabel}`,
     openGraph: {
       title,

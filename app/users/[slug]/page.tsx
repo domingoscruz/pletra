@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${displayName}'s profile - Pletra`,
+    title: `${displayName}'s profile - RePletra`,
   };
 }
 
@@ -70,6 +70,7 @@ type HistoryItem = {
 type EpisodeMetadata = {
   releasedAt?: string;
   rating?: number;
+  episodeType?: string;
   totalEpisodesInSeason: number;
   isLastSeason: boolean;
 };
@@ -199,6 +200,10 @@ function getEpisodeBadge(item: HistoryItem, metadata?: EpisodeMetadata) {
 
   if (season === 1 && number === 1) {
     return "Series Premiere" as const;
+  }
+
+  if (metadata.episodeType === "mid_season_finale") {
+    return "Mid Season Finale" as const;
   }
 
   if (number === 1) {

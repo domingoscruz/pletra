@@ -1,4 +1,4 @@
-# Pletra
+# RePletra
 
 A modern web client for [Trakt](https://trakt.tv), deployed with [Vinext](https://github.com/cloudflare/vinext).
 

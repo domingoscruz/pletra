@@ -89,7 +89,7 @@ export interface TraktMediaItem {
 }
 
 /**
- * Normalized interface for Pletra's MediaCard component.
+ * Normalized interface for RePletra's MediaCard component.
  */
 export interface MediaCardProps {
   title: string;
@@ -102,7 +102,7 @@ export interface MediaCardProps {
 }
 
 /**
- * Central mapper to transform Trakt API responses into Pletra's MediaCard props.
+ * Central mapper to transform Trakt API responses into RePletra's MediaCard props.
  * Handles nested objects from search, trending, and direct sync returns.
  */
 export function mapTraktToMediaCard(

@@ -7,6 +7,7 @@ interface TraktEpisodeSummary {
   ids?: { trakt?: number | null };
   first_aired?: string | null;
   rating?: number | null;
+  episode_type?: string | null;
 }
 
 interface TraktSeasonSummary {
@@ -74,6 +75,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
                 {
                   releasedAt?: string;
                   rating?: number;
+                  episodeType?: string;
                   totalEpisodesInSeason: number;
                   isLastSeason: boolean;
                 }
@@ -93,6 +95,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
               {
                 releasedAt?: string;
                 rating?: number;
+                episodeType?: string;
                 totalEpisodesInSeason: number;
                 isLastSeason: boolean;
               }
@@ -113,6 +116,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
                 metadata[traktId] = {
                   releasedAt: episode.first_aired ?? undefined,
                   rating: episode.rating ?? undefined,
+                  episodeType: episode.episode_type ?? undefined,
                   totalEpisodesInSeason,
                   isLastSeason,
                 };
@@ -129,6 +133,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
               {
                 releasedAt?: string;
                 rating?: number;
+                episodeType?: string;
                 totalEpisodesInSeason: number;
                 isLastSeason: boolean;
               }

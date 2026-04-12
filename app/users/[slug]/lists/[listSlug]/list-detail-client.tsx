@@ -84,6 +84,7 @@ const typeFilters = [
   { value: "all", label: "All" },
   { value: "movie", label: "Movies" },
   { value: "show", label: "Shows" },
+  { value: "episode", label: "Episodes" },
   { value: "person", label: "People" },
 ];
 
@@ -101,7 +102,7 @@ function getItemMeta(item: ListEntry) {
 function matchesTypeFilter(item: ListEntry, filter: string) {
   if (filter === "all") return true;
   if (filter === "show") {
-    return item.type === "show" || item.type === "season" || item.type === "episode";
+    return item.type === "show" || item.type === "season";
   }
   return item.type === filter;
 }
@@ -263,6 +264,95 @@ function EditListModal({
   );
 }
 
+function NotesIcon() {
+  return (
+    <svg
+      className="h-3 w-3 text-zinc-200"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      viewBox="0 0 24 24"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M6.75 3.75h10.5A2.25 2.25 0 0119.5 6v12a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18V6a2.25 2.25 0 012.25-2.25z"
+      />
+    </svg>
+  );
+}
+
+function EditNotesModal({
+  itemTitle,
+  initialNotes,
+  pending,
+  onClose,
+  onSave,
+}: {
+  itemTitle: string;
+  initialNotes: string | null;
+  pending: boolean;
+  onClose: () => void;
+  onSave: (notes: string) => void;
+}) {
+  const [notes, setNotes] = useState(initialNotes ?? "");
+
+  return (
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold italic text-zinc-100">Add Notes</h2>
+            <p className="mt-1 text-sm text-zinc-500">{itemTitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={7}
+          maxLength={2000}
+          placeholder="Write a note for this list item..."
+          className="mt-5 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/20"
+        />
+
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => onSave(notes)}
+            className="flex-1 rounded-xl bg-fuchsia-600 px-4 py-3 text-sm font-bold uppercase tracking-[0.08em] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pending ? "Saving..." : "Save Notes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ListDetailClient({
   items,
   slug,
@@ -282,6 +372,7 @@ export function ListDetailClient({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [removing, setRemoving] = useState<string | null>(null);
+  const [editingNotesItem, setEditingNotesItem] = useState<ListEntry | null>(null);
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [genreFilter, setGenreFilter] = useState(activeGenres);
   const [editOpen, setEditOpen] = useState(false);
@@ -346,6 +437,38 @@ export function ListDetailClient({
     } finally {
       setRemoving(null);
     }
+  }
+
+  function openNotesEditor(entry: ListEntry) {
+    setEditingNotesItem(entry);
+  }
+
+  function saveItemNotes(notes: string) {
+    if (!editingNotesItem?.listItemId) {
+      toast("This item cannot be updated right now.");
+      return;
+    }
+
+    startSaving(() => {
+      void (async () => {
+        try {
+          await fetchTraktRouteJson(
+            `/api/trakt/users/me/lists/${listSlug}/items/${editingNotesItem.listItemId}`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ notes }),
+              timeoutMs: 10000,
+            },
+          );
+          setEditingNotesItem(null);
+          toast("Notes updated.");
+          router.refresh();
+        } catch (error) {
+          toast(getErrorMessage(error, "Failed to update notes."));
+        }
+      })();
+    });
   }
 
   function saveListSettings(payload: {
@@ -576,6 +699,18 @@ export function ListDetailClient({
                     showInlineActions
                     squareBottom={true}
                     note={item.notes}
+                    imageFooterOverlay={
+                      isOwner && !item.notes ? (
+                        <button
+                          type="button"
+                          onClick={() => openNotesEditor(item)}
+                          className="inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-black"
+                        >
+                          <span>Add Notes</span>
+                          <NotesIcon />
+                        </button>
+                      ) : null
+                    }
                   />
                 )}
               </div>
@@ -654,26 +789,48 @@ export function ListDetailClient({
               </Link>
 
               {isOwner && (
-                <button
-                  onClick={() => removeItem(item)}
-                  disabled={removing === item.id}
-                  className="shrink-0 cursor-pointer rounded p-1 text-zinc-700 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 disabled:opacity-50"
-                  title="Remove from list"
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.5}
-                    viewBox="0 0 24 24"
+                <div className="flex shrink-0 items-center gap-2">
+                  {!item.notes && (
+                    <button
+                      type="button"
+                      onClick={() => openNotesEditor(item)}
+                      className="inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-black"
+                    >
+                      <span>Add Notes</span>
+                      <NotesIcon />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => removeItem(item)}
+                    disabled={removing === item.id}
+                    className="cursor-pointer rounded p-1 text-zinc-700 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 disabled:opacity-50"
+                    title="Remove from list"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               )}
             </div>
           ))}
         </div>
+      )}
+
+      {editingNotesItem && (
+        <EditNotesModal
+          itemTitle={editingNotesItem.title}
+          initialNotes={editingNotesItem.notes}
+          pending={isSaving}
+          onClose={() => setEditingNotesItem(null)}
+          onSave={saveItemNotes}
+        />
       )}
 
       {editOpen && (

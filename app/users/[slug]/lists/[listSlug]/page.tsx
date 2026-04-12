@@ -30,13 +30,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       const listName = list.name ?? "List";
       const userName = list.user?.username ?? slug;
       return {
-        title: `${listName}, a list by ${userName} - Pletra`,
+        title: `${listName}, a list by ${userName} - RePletra`,
       };
     }
   } catch {}
 
   return {
-    title: `${listSlug}, a list by ${slug} - Pletra`,
+    title: `${listSlug}, a list by ${slug} - RePletra`,
   };
 }
 
@@ -301,7 +301,9 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         : item.season?.number != null
           ? `Season ${item.season.number}`
           : undefined,
-      posterUrl: images[i]?.poster ?? null,
+      posterUrl: item.episode
+        ? (extractTraktImage(item.show, ["poster"]) ?? images[i]?.poster ?? null)
+        : (images[i]?.poster ?? null),
       backdropUrl: images[i]?.still ?? images[i]?.backdrop ?? null,
       mediaType: item.movie
         ? ("movies" as const)

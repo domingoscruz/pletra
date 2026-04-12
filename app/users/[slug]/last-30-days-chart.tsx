@@ -35,6 +35,7 @@ export function Last30DaysChart({
   const router = useRouter();
   const [hoveredDay, setHoveredDay] = useState<number | null>(null);
   const maxCount = Math.max(...days.map((day) => day.value), 1);
+  const dayGridStyle = { gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` };
 
   return (
     <section
@@ -69,7 +70,7 @@ export function Last30DaysChart({
         <div className="pointer-events-none absolute inset-y-0 left-0 w-px bg-zinc-600/55" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-zinc-600/55" />
 
-        <div className="grid h-36 grid-cols-30 items-end gap-px pl-1 pr-1">
+        <div className="grid h-36 items-end gap-px pl-1 pr-1" style={dayGridStyle}>
           {days.map((day, index) => (
             <div key={day.key} className="relative flex h-full flex-col justify-end">
               <div className="pointer-events-none absolute bottom-[-4px] left-0 h-4 w-px bg-zinc-600/55" />
@@ -127,7 +128,10 @@ export function Last30DaysChart({
         <div className="pointer-events-none absolute bottom-[-4px] right-0 h-4 w-px bg-zinc-600/55" />
       </div>
 
-      <div className="grid grid-cols-30 gap-px pt-1.5 text-center text-[0.68rem] text-zinc-500">
+      <div
+        className="grid gap-px pt-1.5 text-center text-[0.68rem] text-zinc-500"
+        style={dayGridStyle}
+      >
         {days.map((day) => (
           <span key={day.key}>{day.label}</span>
         ))}

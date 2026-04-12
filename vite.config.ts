@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 /**
- * Vite configuration for the Pletra project.
+ * Vite configuration for the RePletra project.
  * Includes support for React, Tailwind CSS, and Vitest.
  *
  * The 'staged' property is used by the Vite Plus (Vite+)

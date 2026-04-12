@@ -84,7 +84,10 @@ async function getEpisodeMetadata(client: any, showId: string | number) {
             return null;
           } catch (error) {
             if (!isTraktExpectedError(error)) {
-              console.error(`[Pletra] Error fetching episode metadata for show ${showId}:`, error);
+              console.error(
+                `[RePletra] Error fetching episode metadata for show ${showId}:`,
+                error,
+              );
             }
             return null;
           }
@@ -154,7 +157,7 @@ async function getCachedStartWatchingData(userKey: string) {
                 })
                 .catch((error: any) => {
                   if (!isTraktExpectedError(error)) {
-                    console.error("[Pletra] Failed to fetch show ratings:", error);
+                    console.error("[RePletra] Failed to fetch show ratings:", error);
                   }
                   return { status: 403, body: [] };
                 }),
@@ -165,7 +168,7 @@ async function getCachedStartWatchingData(userKey: string) {
                 })
                 .catch((error: any) => {
                   if (!isTraktExpectedError(error)) {
-                    console.error("[Pletra] Failed to fetch movie ratings:", error);
+                    console.error("[RePletra] Failed to fetch movie ratings:", error);
                   }
                   return { status: 403, body: [] };
                 }),
@@ -261,7 +264,7 @@ async function getCachedStartWatchingData(userKey: string) {
             return { showItems, movieItems };
           } catch (error) {
             if (!isTraktExpectedError(error)) {
-              console.error("[Pletra] Critical error in StartWatching component:", error);
+              console.error("[RePletra] Critical error in StartWatching component:", error);
             }
             throw error;
           }
@@ -305,7 +308,7 @@ export async function getStartWatchingSectionPayload(): Promise<StartWatchingSec
     };
   } catch (error) {
     const expected = isTraktExpectedError(error);
-    console[expected ? "warn" : "error"]("[Pletra] Start Watching Payload Error:", error);
+    console[expected ? "warn" : "error"]("[RePletra] Start Watching Payload Error:", error);
 
     return {
       status: "error",

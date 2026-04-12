@@ -18,6 +18,7 @@ type ContinueWatchingItem = {
   specialTag?:
     | "Series Premiere"
     | "Season Premiere"
+    | "Mid Season Finale"
     | "Season Finale"
     | "Series Finale"
     | "New Episode";

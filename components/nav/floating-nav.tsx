@@ -97,32 +97,6 @@ function SettingsPopover({ isSignedIn }: { isSignedIn: boolean }) {
             </button>
           </label>
 
-          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/5">
-            <span className="text-sm text-zinc-300">Default View</span>
-            <div className="flex gap-0.5 rounded-md bg-zinc-800 p-0.5">
-              <button
-                onClick={() => updateSetting("defaultView", "grid")}
-                className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-                  settings.defaultView === "grid"
-                    ? "bg-white/10 text-white"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                Grid
-              </button>
-              <button
-                onClick={() => updateSetting("defaultView", "list")}
-                className={`cursor-pointer rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-                  settings.defaultView === "list"
-                    ? "bg-white/10 text-white"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                List
-              </button>
-            </div>
-          </label>
-
           {isSignedIn && (
             <>
               <div className="my-2 h-px bg-zinc-800" />

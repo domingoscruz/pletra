@@ -3,7 +3,7 @@ import { fetchTmdbImages } from "@/lib/tmdb";
 import { formatRuntime } from "@/lib/format";
 import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
-import { getCachedShowSeasonCounts } from "@/lib/trakt-cache";
+import { getCachedShowEpisodeMetadata, getCachedShowSeasonCounts } from "@/lib/trakt-cache";
 import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
 import { extractTraktImage } from "@/lib/trakt-images";
 import { ContinueWatchingGrid } from "./continue-watching-grid";
@@ -140,10 +140,18 @@ async function getCachedContinueWatchingItems(userKey: string) {
                   : null,
               ),
             );
+            const showEpisodeMetadata = await Promise.all(
+              shows.map((item) =>
+                item.show?.ids?.slug
+                  ? getCachedShowEpisodeMetadata(item.show.ids.slug).catch(() => null)
+                  : null,
+              ),
+            );
 
             const exactAiredMap = new Map<string, number>();
             const seasonEpisodesMap = new Map<string, Record<number, number>>();
             const maxSeasonMap = new Map<string, number>();
+            const episodeTypeMap = new Map<string, Record<number, string | undefined>>();
 
             showSeasons.forEach((seasonsData, i) => {
               const slug = shows[i].show?.ids?.slug;
@@ -168,6 +176,17 @@ async function getCachedContinueWatchingItems(userKey: string) {
 
               seasonEpisodesMap.set(slug, totalEpisodesPerSeason);
               maxSeasonMap.set(slug, maxS);
+            });
+
+            showEpisodeMetadata.forEach((metadata, i) => {
+              const slug = shows[i].show?.ids?.slug;
+              if (!slug || !metadata) return;
+
+              const byTraktId: Record<number, string | undefined> = {};
+              Object.entries(metadata).forEach(([traktId, episode]) => {
+                byTraktId[Number(traktId)] = episode.episodeType;
+              });
+              episodeTypeMap.set(slug, byTraktId);
             });
 
             const [showImages, seasonImages, movieImages] = await Promise.all([
@@ -205,7 +224,11 @@ async function getCachedContinueWatchingItems(userKey: string) {
               const finalAiredCount = Math.max(calculatedAired, item.progress.completed + 1);
 
               let specialTag: string | undefined;
-              const epType = nextEp.episode_type;
+              const epType =
+                nextEp.episode_type ??
+                (nextEp.ids?.trakt
+                  ? episodeTypeMap.get(item.show.ids.slug)?.[nextEp.ids.trakt]
+                  : undefined);
               const showSeasonData = seasonEpisodesMap.get(item.show.ids.slug);
               const maxSeason = maxSeasonMap.get(item.show.ids.slug) || 0;
               const episodesInThisSeason = showSeasonData ? showSeasonData[nextEp.season] : 0;
@@ -216,6 +239,8 @@ async function getCachedContinueWatchingItems(userKey: string) {
               if (epType) {
                 if (epType === "series_finale" || (epType === "season_finale" && isLastSeason)) {
                   specialTag = "Series Finale";
+                } else if (epType === "mid_season_finale") {
+                  specialTag = "Mid Season Finale";
                 } else if (epType === "season_finale") {
                   specialTag = "Season Finale";
                 } else if (epType === "series_premiere") {
@@ -279,7 +304,7 @@ async function getCachedContinueWatchingItems(userKey: string) {
             return items.slice(0, 30);
           } catch (error) {
             if (!isTraktExpectedError(error)) {
-              console.error("[Pletra] Continue Watching Error:", error);
+              console.error("[RePletra] Continue Watching Error:", error);
             }
             throw error;
           }
@@ -313,7 +338,7 @@ export async function getContinueWatchingSectionPayload(): Promise<ContinueWatch
     return { status: "ok", items: items as any[] };
   } catch (error) {
     const expected = isTraktExpectedError(error);
-    console[expected ? "warn" : "error"]("[Pletra] Continue Watching Payload Error:", error);
+    console[expected ? "warn" : "error"]("[RePletra] Continue Watching Payload Error:", error);
 
     return {
       status: "error",

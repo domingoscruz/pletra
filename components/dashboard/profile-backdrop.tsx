@@ -32,7 +32,7 @@ export async function ProfileBackdrop() {
       return <Backdrop src={coverImage} alt="Profile backdrop" />;
     } catch (error) {
       if (!isTraktExpectedError(error)) {
-        console.error("[Pletra] Profile Backdrop Error:", error);
+        console.error("[RePletra] Profile Backdrop Error:", error);
       }
       return null;
     }

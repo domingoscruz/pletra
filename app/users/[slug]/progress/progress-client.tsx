@@ -17,6 +17,7 @@ import { ProxiedImage } from "@/components/ui/proxied-image";
 import { Select } from "@/components/ui/select";
 import {
   fetchWatchlistIds,
+  fetchPersonalListItemIds,
   syncTraktData,
   TRAKT_RATINGS,
 } from "@/components/dashboard/card-actions";
@@ -33,6 +34,7 @@ export interface NextEpisodeDetails {
   rating?: number;
   imageUrl: string | null;
   releasedAt: string | null;
+  isMidSeasonFinale?: boolean;
   isSeasonFinale?: boolean;
   isSeriesFinale?: boolean;
 }
@@ -162,9 +164,12 @@ const formatRelativeTime = (dateString: string): string => {
   const date = new Date(dateString);
   const now = new Date();
   const diffInMs = now.getTime() - date.getTime();
+  const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
   const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
 
-  if (diffInHours < 1) return "just now";
+  if (diffInMinutes < 5) return "just now";
+  if (diffInMinutes < 60)
+    return diffInMinutes === 1 ? "1 minute ago" : `${diffInMinutes} minutes ago`;
   if (diffInHours === 1) return "an hour ago";
   if (diffInHours < 24) return `${diffInHours} hours ago`;
 
@@ -414,6 +419,70 @@ const getPaginationWindow = (currentPage: number, totalPages: number) => {
     .filter((page) => page >= 1 && page <= totalPages)
     .sort((a, b) => a - b);
 };
+
+function ProgressPagination({
+  currentPage,
+  totalPages,
+  isPending,
+  paginationPages,
+  onNavigate,
+  className = "",
+}: {
+  currentPage: number;
+  totalPages: number;
+  isPending: boolean;
+  paginationPages: number[];
+  onNavigate: (page: number) => void;
+  className?: string;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className={cn("flex items-center justify-center gap-3 text-white", className)}>
+      <button
+        onClick={() => onNavigate(currentPage - 1)}
+        disabled={currentPage <= 1 || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Previous page"
+      >
+        <span className="text-3xl leading-none">←</span>
+      </button>
+      <div className="flex items-center gap-2">
+        {paginationPages.map((page, index) => {
+          const previousPage = paginationPages[index - 1];
+          const showEllipsis = previousPage && page - previousPage > 1;
+
+          return (
+            <div key={page} className="flex items-center gap-2">
+              {showEllipsis && <span className="px-2 text-zinc-500">.....</span>}
+              <button
+                onClick={() => onNavigate(page)}
+                disabled={isPending || page === currentPage}
+                className={cn(
+                  "flex h-10 min-w-10 items-center justify-center px-3 text-lg font-bold transition-colors",
+                  page === currentPage
+                    ? "bg-[#b65fe0] text-white"
+                    : "text-white hover:text-[#d9a2f0]",
+                )}
+                aria-label={`Page ${page}`}
+              >
+                {page}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        onClick={() => onNavigate(currentPage + 1)}
+        disabled={currentPage >= totalPages || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Next page"
+      >
+        <span className="text-3xl leading-none">→</span>
+      </button>
+    </div>
+  );
+}
 
 const getProgressPercentage = (aired: number, completed: number) =>
   aired > 0 ? (completed >= aired ? 100 : Math.floor((completed / aired) * 100)) : 0;
@@ -1557,6 +1626,7 @@ const ProgressShowRow = memo(
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const [, setUserRating] = useState<number | undefined>(item.userRating);
     const [inWatchlist, setInWatchlist] = useState(false);
+    const [inPersonalLists, setInPersonalLists] = useState(false);
     const [availableLists, setAvailableLists] = useState<PersonalListOption[]>([]);
     const [selectedListSlugs, setSelectedListSlugs] = useState<string[]>([]);
     const [listsLoading, setListsLoading] = useState(false);
@@ -1627,9 +1697,13 @@ const ProgressShowRow = memo(
 
     useEffect(() => {
       let isMounted = true;
-      fetchWatchlistIds().then((ids) => {
-        if (isMounted) setInWatchlist(ids.includes(item.traktId));
-      });
+      Promise.all([fetchWatchlistIds(), fetchPersonalListItemIds("shows")]).then(
+        ([watchlistIds, personalListIds]) => {
+          if (!isMounted) return;
+          setInWatchlist(watchlistIds.includes(item.traktId));
+          setInPersonalLists(personalListIds.includes(item.traktId));
+        },
+      );
       return () => {
         isMounted = false;
       };
@@ -1977,6 +2051,7 @@ const ProgressShowRow = memo(
             "success",
           );
           setSelectedListSlugs([]);
+          setInPersonalLists(true);
           setActiveMenu(null);
         } else if (addedCount > 0) {
           showToast(`Added to ${addedCount} lists, ${failedCount} failed.`, "success");
@@ -2290,6 +2365,10 @@ const ProgressShowRow = memo(
                       <span className="inline-flex bg-[#ef4444] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white">
                         Series Finale
                       </span>
+                    ) : next.isMidSeasonFinale ? (
+                      <span className="inline-flex bg-[#2444bf] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white">
+                        Mid Season Finale
+                      </span>
                     ) : next.isSeasonFinale ? (
                       <span className="inline-flex bg-[#9810fa] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white">
                         Season Finale
@@ -2379,7 +2458,7 @@ const ProgressShowRow = memo(
                 }
                 className={cn(
                   "flex w-12 items-center justify-center border-l border-white/5 transition-colors",
-                  inWatchlist
+                  inWatchlist || inPersonalLists
                     ? "bg-[#23a5dd] text-white"
                     : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
                 )}
@@ -2729,7 +2808,16 @@ export function ProgressClient({
   };
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-[112.5rem] flex-col px-2 pb-4 md:pb-6">
+    <div className="mx-auto flex w-full max-w-[112.5rem] flex-col px-2 pb-0">
+      <ProgressPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        isPending={isPending}
+        paginationPages={paginationPages}
+        onNavigate={(page) => navigate(buildUrl({ page }))}
+        className="pb-4 md:pb-3"
+      />
+
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="relative h-11 w-80">
           <input
@@ -2793,7 +2881,7 @@ export function ProgressClient({
       </div>
 
       {totalPages > 1 && (
-        <div className="mt-auto pt-8 flex items-center justify-center gap-3 text-white md:pt-10">
+        <div className="pt-3 flex items-center justify-center gap-3 text-white md:pt-2">
           <button
             onClick={() => navigate(buildUrl({ page: currentPage - 1 }))}
             disabled={currentPage <= 1 || isPending}
