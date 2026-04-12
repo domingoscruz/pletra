@@ -100,6 +100,12 @@ type ListedItem = {
   };
 };
 
+type ListItemImages = {
+  poster: string | null;
+  backdrop: string | null;
+  still: string | null;
+};
+
 export default async function ListDetailPage({ params, searchParams }: Props) {
   const { slug, listSlug } = await params;
   const sp = await searchParams;
@@ -197,12 +203,12 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 
   // Fetch images (person images from TMDB)
   const images = await Promise.all(
-    items.map(async (item) => {
+    items.map(async (item): Promise<ListItemImages> => {
       if (item.type === "person") {
         const tmdbId = item.person?.ids?.tmdb;
-        if (!tmdbId) return { poster: null, backdrop: null };
+        if (!tmdbId) return { poster: null, backdrop: null, still: null };
         const poster = await fetchTmdbPersonImage(tmdbId).catch(() => null);
-        return { poster, backdrop: null };
+        return { poster, backdrop: null, still: null };
       }
       const tmdbId =
         item.movie?.ids?.tmdb ??
