@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getUserProfileData } from "@/lib/metadata";
+import { getUserDisplayName, getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { getOptionalTraktClient } from "@/lib/trakt-server";
@@ -21,9 +21,9 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const profile = await getUserProfileData(slug);
-  const userName = profile?.username ?? slug;
+  const displayName = getUserDisplayName(profile, slug);
   return {
-    title: `${userName}'s watchlist - Pletra`,
+    title: `${displayName}'s watchlist - Pletra`,
   };
 }
 
@@ -238,7 +238,11 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   );
 
   const serialized = rankedItems.map((item, i) => ({
-    id: item.id ?? item.rank ?? i,
+    id: String(
+      item.id ??
+        `${item.type ?? (item.movie ? "movie" : "show")}-${item.movie?.ids?.trakt ?? item.show?.ids?.trakt ?? item.rank ?? i}`,
+    ),
+    sourceRank: item.absoluteRank,
     rank: item.absoluteRank,
     listedAt: item.listed_at ?? "",
     type: item.type ?? (item.movie ? "movie" : "show"),

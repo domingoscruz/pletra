@@ -70,6 +70,19 @@ type UserProfileSummary = {
   name?: string;
 };
 
+export function getUserDisplayName(
+  profile: UserProfileSummary | null | undefined,
+  fallbackSlug: string,
+) {
+  const preferredName = profile?.name?.trim();
+  if (preferredName) return preferredName;
+
+  const username = profile?.username?.trim();
+  if (username) return username;
+
+  return fallbackSlug;
+}
+
 export const getPersonData = cache(async (slug: string) => {
   try {
     const client = createTraktClient();

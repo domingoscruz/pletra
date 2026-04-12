@@ -5,6 +5,7 @@ import { withLocalCache } from "@/lib/local-cache";
 import { measureAsync } from "@/lib/perf";
 import { getCachedShowSeasonCounts } from "@/lib/trakt-cache";
 import { getTraktErrorMessage, isTraktExpectedError } from "@/lib/trakt-errors";
+import { extractTraktImage } from "@/lib/trakt-images";
 import { ContinueWatchingGrid } from "./continue-watching-grid";
 
 export const dynamic = "force-dynamic";
@@ -62,25 +63,6 @@ interface MovieProgressItem {
     images?: Record<string, any> | null;
   };
   paused_at?: string | null;
-}
-
-function extractTraktImage(obj: Record<string, any>, type: "poster" | "fanart"): string | null {
-  const images = obj?.images || obj?.show?.images || obj?.movie?.images;
-  if (!images || !images[type]) return null;
-
-  const target = images[type];
-  let rawUrl: string | null = null;
-
-  if (Array.isArray(target) && target.length > 0) {
-    rawUrl = target[0];
-  } else if (typeof target === "string") {
-    rawUrl = target;
-  } else if (typeof target === "object") {
-    rawUrl = target.medium || target.full || target.thumb || null;
-  }
-
-  if (!rawUrl) return null;
-  return rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
 }
 
 async function getCachedContinueWatchingItems(userKey: string) {
@@ -257,9 +239,9 @@ async function getCachedContinueWatchingItems(userKey: string) {
                 subtitle: `${nextEp.season}x${String(nextEp.number).padStart(2, "0")} ${nextEp.title}`,
                 href: `/shows/${item.show.ids.slug}/seasons/${nextEp.season}/episodes/${nextEp.number}`,
                 showHref: `/shows/${item.show.ids.slug}`,
-                backdropUrl: showImages[i]?.backdrop || extractTraktImage(item.show, "fanart"),
-                posterUrl: seasonImages[i]?.poster || extractTraktImage(item.show, "poster"),
-                showPosterUrl: showImages[i]?.poster || extractTraktImage(item.show, "poster"),
+                backdropUrl: showImages[i]?.backdrop || extractTraktImage(item.show, ["fanart"]),
+                posterUrl: seasonImages[i]?.poster || extractTraktImage(item.show, ["poster"]),
+                showPosterUrl: showImages[i]?.poster || extractTraktImage(item.show, ["poster"]),
                 rating: nextEp.rating ?? 0,
                 userRating: epRatingMap.get(nextEp.ids.trakt),
                 specialTag,
@@ -281,8 +263,8 @@ async function getCachedContinueWatchingItems(userKey: string) {
                 title: item.movie.title,
                 subtitle: `${item.movie.year} - ${formatRuntime(item.movie.runtime || 0)}`,
                 href: `/movies/${item.movie.ids.slug}`,
-                backdropUrl: movieImages[i]?.backdrop || extractTraktImage(item.movie, "fanart"),
-                posterUrl: movieImages[i]?.poster || extractTraktImage(item.movie, "poster"),
+                backdropUrl: movieImages[i]?.backdrop || extractTraktImage(item.movie, ["fanart"]),
+                posterUrl: movieImages[i]?.poster || extractTraktImage(item.movie, ["poster"]),
                 showPosterUrl: null,
                 rating: item.movie.rating ?? 0,
                 userRating: movieRatingMap.get(item.movie.ids.trakt),

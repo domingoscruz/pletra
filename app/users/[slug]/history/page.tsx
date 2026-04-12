@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { getUserProfileData } from "@/lib/metadata";
+import { getUserDisplayName, getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
+import { extractTraktImage } from "@/lib/trakt-images";
 import { getOptionalTraktClient, isCurrentUser } from "@/lib/trakt-server";
 import { fetchTmdbImages } from "@/lib/tmdb";
 import { HistoryClient } from "./history-client";
@@ -20,10 +21,10 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const profile = await getUserProfileData(slug);
-  const username = profile?.username ?? slug;
+  const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${username}'s history - Pletra`,
+    title: `${displayName}'s history - Pletra`,
   };
 }
 
@@ -38,12 +39,14 @@ type HistoryItem = {
     runtime?: number;
     rating?: number;
     genres?: string[];
+    images?: Record<string, unknown> | null;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   show?: {
     title?: string;
     year?: number;
     rating?: number;
+    images?: Record<string, unknown> | null;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   episode?: {
@@ -52,6 +55,8 @@ type HistoryItem = {
     title?: string;
     rating?: number;
     runtime?: number;
+    first_aired?: string;
+    images?: Record<string, unknown> | null;
     ids?: { trakt?: number };
   };
 };
@@ -357,7 +362,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       if (dayFilter) {
         const res = await client.users.history.movies({
           params: { id: slug },
-          query: { page: 1, limit: 250, extended: "full", ...dateRange },
+          query: { page: 1, limit: 250, extended: "full,images" as any, ...dateRange },
         });
         if (res.status === 200) {
           items = res.body as HistoryItem[];
@@ -366,7 +371,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       } else {
         const res = await client.users.history.movies({
           params: { id: slug },
-          query: { page, limit, extended: "full" },
+          query: { page, limit, extended: "full,images" as any },
         });
         if (res.status === 200) {
           items = res.body as HistoryItem[];
@@ -378,7 +383,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       if (dayFilter) {
         const res = await client.users.history.shows({
           params: { id: slug },
-          query: { page: 1, limit: 250, extended: "full", ...dateRange },
+          query: { page: 1, limit: 250, extended: "full,images" as any, ...dateRange },
         });
         if (res.status === 200) {
           items = res.body as HistoryItem[];
@@ -387,7 +392,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       } else {
         const res = await client.users.history.shows({
           params: { id: slug },
-          query: { page, limit, extended: "full" },
+          query: { page, limit, extended: "full,images" as any },
         });
         if (res.status === 200) {
           items = res.body as HistoryItem[];
@@ -400,14 +405,14 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         client.users.history.movies({
           params: { id: slug },
           query: dayFilter
-            ? { page: 1, limit: 250, extended: "full", ...dateRange }
-            : { page, limit: Math.ceil(limit / 2), extended: "full" },
+            ? { page: 1, limit: 250, extended: "full,images" as any, ...dateRange }
+            : { page, limit: Math.ceil(limit / 2), extended: "full,images" as any },
         }),
         client.users.history.shows({
           params: { id: slug },
           query: dayFilter
-            ? { page: 1, limit: 250, extended: "full", ...dateRange }
-            : { page, limit: Math.ceil(limit / 2), extended: "full" },
+            ? { page: 1, limit: 250, extended: "full,images" as any, ...dateRange }
+            : { page, limit: Math.ceil(limit / 2), extended: "full,images" as any },
         }),
       ]);
 
@@ -514,15 +519,55 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   });
 
   const images = await Promise.all(
-    items.map((item) => {
+    items.map(async (item) => {
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
-      return tmdbId
-        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
+      const tmdbImages = tmdbId
+        ? await fetchTmdbImages(
+            tmdbId,
+            tmdbType as "movie" | "tv",
+            item.episode?.season,
+            item.episode?.number,
+          ).catch(() => ({
             poster: null,
             backdrop: null,
+            still: null,
           }))
-        : Promise.resolve({ poster: null, backdrop: null });
+        : { poster: null, backdrop: null, still: null };
+      const tmdbShowFallback =
+        item.episode && tmdbId
+          ? await fetchTmdbImages(tmdbId, "tv").catch(() => ({
+              poster: null,
+              backdrop: null,
+              still: null,
+            }))
+          : null;
+
+      const traktPoster = item.movie
+        ? extractTraktImage(item.movie as { images?: Record<string, unknown> | null }, ["poster"])
+        : extractTraktImage(item.show, ["poster"]);
+      const traktBackdrop = item.movie
+        ? extractTraktImage(item.movie as { images?: Record<string, unknown> | null }, [
+            "fanart",
+            "poster",
+          ])
+        : extractTraktImage(item.episode, ["screenshot", "thumb"]) ||
+          extractTraktImage(item.show, ["fanart", "poster"]);
+
+      return {
+        poster:
+          tmdbShowFallback?.poster ??
+          tmdbImages.poster ??
+          traktPoster ??
+          tmdbImages.still ??
+          tmdbImages.backdrop,
+        backdrop:
+          tmdbImages.backdrop ??
+          tmdbImages.still ??
+          tmdbShowFallback?.backdrop ??
+          tmdbShowFallback?.poster ??
+          traktBackdrop,
+      };
     }),
   );
 

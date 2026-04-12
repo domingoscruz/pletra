@@ -47,8 +47,6 @@ const privacyOptions = [
   { value: "public", label: "Public" },
 ];
 
-const reorderStorageKey = (slug: string) => `pletra-lists-order-${slug}`;
-
 function formatCompactDate(value?: string) {
   if (!value) return null;
   return new Date(value).toLocaleDateString("en-US", {
@@ -276,11 +274,9 @@ function ListFormModal({
 
 export function ListsClient({
   initialCards,
-  slug,
   isOwner,
 }: {
   initialCards: ListCardData[];
-  slug: string;
   isOwner: boolean;
 }) {
   const router = useRouter();
@@ -288,41 +284,12 @@ export function ListsClient({
   const [isPending, startTransition] = useTransition();
   const [filter, setFilter] = useState<ListFilter>("all");
   const [cards, setCards] = useState(initialCards);
-  const [reorderMode, setReorderMode] = useState(false);
   const [editingCard, setEditingCard] = useState<ListCardData | null>(null);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     setCards(initialCards);
   }, [initialCards]);
-
-  useEffect(() => {
-    if (!isOwner) return;
-    try {
-      const raw = localStorage.getItem(reorderStorageKey(slug));
-      if (!raw) return;
-      const orderedIds = JSON.parse(raw) as string[];
-      setCards((current) => {
-        const watchlist = current.filter((card) => card.kind === "watchlist");
-        const personal = current.filter((card) => card.kind === "personal");
-        const followed = current.filter((card) => card.kind === "followed");
-        const byId = new Map(personal.map((card) => [card.id, card]));
-        const orderedPersonal = orderedIds
-          .map((id) => byId.get(id))
-          .filter((card): card is ListCardData => Boolean(card));
-        const remaining = personal.filter((card) => !orderedIds.includes(card.id));
-        return [...watchlist, ...orderedPersonal, ...remaining, ...followed];
-      });
-    } catch {
-      return;
-    }
-  }, [isOwner, slug]);
-
-  useEffect(() => {
-    if (!isOwner) return;
-    const personalIds = cards.filter((card) => card.kind === "personal").map((card) => card.id);
-    localStorage.setItem(reorderStorageKey(slug), JSON.stringify(personalIds));
-  }, [cards, isOwner, slug]);
 
   const filteredCards = useMemo(() => {
     if (filter === "all") return cards;
@@ -332,21 +299,6 @@ export function ListsClient({
   }, [cards, filter]);
 
   const totalItems = filteredCards.reduce((sum, card) => sum + card.itemCount, 0);
-
-  function movePersonalCard(cardId: string, direction: -1 | 1) {
-    setCards((current) => {
-      const watchlist = current.filter((card) => card.kind === "watchlist");
-      const personal = current.filter((card) => card.kind === "personal");
-      const followed = current.filter((card) => card.kind === "followed");
-      const index = personal.findIndex((card) => card.id === cardId);
-      const targetIndex = index + direction;
-      if (index === -1 || targetIndex < 0 || targetIndex >= personal.length) return current;
-      const reordered = [...personal];
-      const [moved] = reordered.splice(index, 1);
-      reordered.splice(targetIndex, 0, moved);
-      return [...watchlist, ...reordered, ...followed];
-    });
-  }
 
   async function createList(payload: { title: string; description: string; privacy: string }) {
     startTransition(() => {
@@ -441,31 +393,6 @@ export function ListsClient({
           <div className="flex flex-wrap items-center gap-3 sm:justify-end">
             <button
               type="button"
-              onClick={() => setReorderMode((current) => !current)}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
-                reorderMode
-                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                  : "border-white/8 bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06] hover:text-white"
-              }`}
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-                />
-              </svg>
-              {reorderMode ? "Done Reordering" : "Reorder"}
-            </button>
-
-            <button
-              type="button"
               onClick={() => setCreating(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/15"
             >
@@ -500,7 +427,6 @@ export function ListsClient({
           {filteredCards.map((card) => {
             const updatedLabel = formatCompactDate(card.updatedAt);
             const sortLabel = formatSortLabel(card.sortBy, card.sortHow);
-            const canMove = reorderMode && isOwner && card.kind === "personal";
 
             return (
               <div
@@ -662,25 +588,6 @@ export function ListsClient({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        {canMove && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => movePersonalCard(card.id, -1)}
-                              className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
-                            >
-                              Move Up
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => movePersonalCard(card.id, 1)}
-                              className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
-                            >
-                              Move Down
-                            </button>
-                          </>
-                        )}
-
                         <Link
                           href={card.href}
                           className="inline-flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:bg-white/[0.06] hover:text-white"

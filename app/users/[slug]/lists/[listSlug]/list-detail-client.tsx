@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,9 @@ import { useToast } from "@/lib/toast";
 import { useNavigate } from "@/lib/use-navigate";
 
 type ListEntry = {
-  id: number;
+  id: string;
+  listItemId?: number;
+  sourceRank: number;
   rank: number;
   listedAt: string;
   notes: string | null;
@@ -24,10 +26,16 @@ type ListEntry = {
   rating?: number;
   runtime?: number;
   href: string;
+  showHref?: string;
+  subtitle?: string;
+  meta?: string;
+  primaryText?: string;
+  secondaryText?: string;
   posterUrl: string | null;
   backdropUrl: string | null;
-  mediaType: "movies" | "shows";
+  mediaType: "movies" | "shows" | "episodes";
   ids: Record<string, unknown>;
+  episodeIds?: Record<string, unknown>;
   genres: string[];
 };
 
@@ -79,57 +87,11 @@ const typeFilters = [
   { value: "person", label: "People" },
 ];
 
-const manageStorageKey = (slug: string, listSlug: string) =>
-  `pletra-list-manage-${slug}-${listSlug}`;
-
-function shouldUseManagedOrder(isOwner: boolean, manageMode: boolean, sortBy: string) {
-  return isOwner && manageMode && sortBy === "rank";
-}
-
-function createTransparentDragImage() {
-  const pixel = document.createElement("canvas");
-  pixel.width = 1;
-  pixel.height = 1;
-  return pixel;
-}
-
-function createDragPreviewLabel(title: string, meta?: string) {
-  const preview = document.createElement("div");
-  preview.style.position = "fixed";
-  preview.style.left = "-9999px";
-  preview.style.top = "-9999px";
-  preview.style.pointerEvents = "none";
-  preview.style.zIndex = "9999";
-  preview.style.maxWidth = "220px";
-  preview.style.border = "1px solid rgba(255,255,255,0.12)";
-  preview.style.borderRadius = "14px";
-  preview.style.background = "rgba(10,10,10,0.96)";
-  preview.style.boxShadow = "0 24px 60px rgba(0,0,0,0.45)";
-  preview.style.padding = "12px 14px";
-  preview.style.color = "white";
-
-  const titleEl = document.createElement("div");
-  titleEl.style.fontSize = "12px";
-  titleEl.style.fontWeight = "700";
-  titleEl.style.lineHeight = "1.3";
-  titleEl.textContent = title;
-  preview.appendChild(titleEl);
-
-  if (meta) {
-    const metaEl = document.createElement("div");
-    metaEl.style.marginTop = "4px";
-    metaEl.style.fontSize = "10px";
-    metaEl.style.letterSpacing = "0.08em";
-    metaEl.style.textTransform = "uppercase";
-    metaEl.style.color = "rgba(161,161,170,1)";
-    metaEl.textContent = meta;
-    preview.appendChild(metaEl);
+function getItemMeta(item: ListEntry) {
+  if (item.type === "episode") {
+    return item.meta ?? item.subtitle ?? "";
   }
 
-  return preview;
-}
-
-function getItemMeta(item: ListEntry) {
   const parts: string[] = [];
   if (item.year) parts.push(String(item.year));
   if (item.type === "movie" && item.runtime) parts.push(formatRuntime(item.runtime));
@@ -319,61 +281,13 @@ export function ListDetailClient({
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [removing, setRemoving] = useState<number | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [genreFilter, setGenreFilter] = useState(activeGenres);
   const [editOpen, setEditOpen] = useState(false);
-  const [manageMode, setManageMode] = useState(false);
-  const [managedItems, setManagedItems] = useState(items);
-  const [draggedId, setDraggedId] = useState<number | null>(null);
-  const [dragOverId, setDragOverId] = useState<number | null>(null);
-  const dragPreviewRef = useRef<HTMLElement | null>(null);
-  const transparentDragImageRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    setManagedItems(items);
-  }, [items]);
-
-  useEffect(() => {
-    if (!isOwner || sortBy !== "rank") return;
-    try {
-      const raw = localStorage.getItem(manageStorageKey(slug, listSlug));
-      if (!raw) return;
-      const ordered = JSON.parse(raw) as number[];
-      setManagedItems((current) => {
-        const byId = new Map(current.map((item) => [item.id, item]));
-        const orderedIndex = new Map(ordered.map((id, index) => [id, index]));
-        const orderedItems = ordered
-          .map((id) => byId.get(id))
-          .filter((item): item is ListEntry => Boolean(item));
-        const remaining = current.filter((item) => !ordered.includes(item.id));
-        return [...orderedItems, ...remaining].map((item, index) => ({
-          ...item,
-          rank: orderedIndex.get(item.id) ?? item.rank ?? index + 1,
-        }));
-      });
-    } catch {
-      return;
-    }
-  }, [isOwner, listSlug, slug, sortBy]);
-
-  useEffect(() => {
-    if (!shouldUseManagedOrder(isOwner, manageMode, sortBy)) return;
-    localStorage.setItem(
-      manageStorageKey(slug, listSlug),
-      JSON.stringify(managedItems.map((item) => item.id)),
-    );
-  }, [isOwner, listSlug, manageMode, managedItems, slug, sortBy]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (!transparentDragImageRef.current) {
-      transparentDragImageRef.current = createTransparentDragImage();
-    }
-  }, []);
 
   const filtered = useMemo(() => {
-    let result = shouldUseManagedOrder(isOwner, manageMode, sortBy) ? managedItems : items;
+    let result = items;
 
     if (typeFilter !== "all") {
       result = result.filter((item) => matchesTypeFilter(item, typeFilter));
@@ -389,14 +303,7 @@ export function ListDetailClient({
     }
 
     return result;
-  }, [genreFilter, isOwner, items, manageMode, managedItems, search, sortBy, typeFilter]);
-
-  function isVisibleItem(item: ListEntry) {
-    if (typeFilter !== "all" && !matchesTypeFilter(item, typeFilter)) return false;
-    if (genreFilter && !item.genres.includes(genreFilter)) return false;
-    if (search && !item.title.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  }
+  }, [genreFilter, items, search, typeFilter]);
 
   function navigateWithFilters(sort: string, order: string, page: number, genres?: string) {
     const params = new URLSearchParams();
@@ -412,59 +319,6 @@ export function ListDetailClient({
     navigateWithFilters(sortBy, sortHow === "asc" ? "desc" : "asc", 1, genreFilter || undefined);
   }
 
-  function updateRank(itemId: number, targetItemId: number) {
-    setManagedItems((current) => {
-      const visiblePositions = current
-        .map((item, index) => (isVisibleItem(item) ? index : -1))
-        .filter((index) => index >= 0);
-      const visibleItems = visiblePositions.map((index) => current[index]);
-      const fromIndex = visibleItems.findIndex((item) => item.id === itemId);
-      const toIndex = visibleItems.findIndex((item) => item.id === targetItemId);
-      if (fromIndex === -1 || toIndex === -1) return current;
-
-      const reorderedVisible = [...visibleItems];
-      const [moved] = reorderedVisible.splice(fromIndex, 1);
-      reorderedVisible.splice(toIndex, 0, moved);
-
-      const next = [...current];
-      visiblePositions.forEach((position, visibleIndex) => {
-        next[position] = { ...reorderedVisible[visibleIndex], rank: position + 1 };
-      });
-
-      return next.map((item, orderIndex) => ({ ...item, rank: orderIndex + 1 }));
-    });
-  }
-
-  function beginDrag(event: React.DragEvent<HTMLDivElement>, item: ListEntry) {
-    if (!manageMode || !isOwner) return;
-    dragPreviewRef.current?.remove();
-    const preview = createDragPreviewLabel(item.title, getItemMeta(item));
-    document.body.appendChild(preview);
-    dragPreviewRef.current = preview;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(item.id));
-    if (dragPreviewRef.current) {
-      event.dataTransfer.setDragImage(dragPreviewRef.current, 110, 24);
-    } else if (transparentDragImageRef.current) {
-      event.dataTransfer.setDragImage(transparentDragImageRef.current, 0, 0);
-    }
-    setDraggedId(item.id);
-  }
-
-  function finishDrag() {
-    setDraggedId(null);
-    setDragOverId(null);
-    dragPreviewRef.current?.remove();
-    dragPreviewRef.current = null;
-  }
-
-  function handleDrop(targetItemId: number) {
-    if (!manageMode || !isOwner || draggedId == null) return;
-    updateRank(draggedId, targetItemId);
-    setDraggedId(null);
-    setDragOverId(null);
-  }
-
   async function removeItem(entry: ListEntry) {
     if (!confirm(`Remove "${entry.title}" from this list?`)) return;
     setRemoving(entry.id);
@@ -472,9 +326,13 @@ export function ListDetailClient({
       const body =
         entry.type === "person"
           ? { people: [{ ids: { trakt: entry.ids.trakt } }] }
-          : entry.mediaType === "movies"
-            ? { movies: [{ ids: { trakt: entry.ids.trakt } }] }
-            : { shows: [{ ids: { trakt: entry.ids.trakt } }] };
+          : entry.type === "episode"
+            ? { episodes: [{ ids: { trakt: entry.episodeIds?.trakt ?? entry.ids.trakt } }] }
+            : entry.type === "season"
+              ? { seasons: [{ ids: { trakt: entry.ids.trakt } }] }
+              : entry.mediaType === "movies"
+                ? { movies: [{ ids: { trakt: entry.ids.trakt } }] }
+                : { shows: [{ ids: { trakt: entry.ids.trakt } }] };
 
       await fetchTraktRouteJson(`/api/trakt/users/${slug}/lists/${listSlug}/items/remove`, {
         method: "POST",
@@ -525,7 +383,7 @@ export function ListDetailClient({
     });
   }
 
-  const showRanks = manageMode || (listInfo.display_numbers ?? true);
+  const showRanks = listInfo.display_numbers ?? true;
 
   return (
     <div className={`space-y-5 ${isPending ? "opacity-60" : ""}`}>
@@ -579,46 +437,6 @@ export function ListDetailClient({
               >
                 Edit
               </button>
-              <div className="group relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!manageMode && sortBy !== "rank") {
-                      navigateWithFilters("rank", "asc", 1, genreFilter || undefined);
-                      return;
-                    }
-                    setManageMode((current) => !current);
-                  }}
-                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                    manageMode
-                      ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                      : "border-white/8 bg-white/[0.03] text-zinc-200 hover:bg-white/[0.06] hover:text-white"
-                  }`}
-                >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8 4v16M16 4v16M4 8h16M4 16h16"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8 4l-2 2m2-2l2 2m6-2l-2 2m2-2l2 2M8 20l-2-2m2 2l2-2m6 2l-2-2m2 2l2-2M4 8l2-2m-2 2l2 2m0 8l-2-2m-2 2l2-2M20 8l-2-2m2 2l-2 2m2 8l-2-2m2 2l-2-2"
-                    />
-                  </svg>
-                  {manageMode ? "Done" : "Manage"}
-                </button>
-                <div className="pointer-events-none absolute top-full right-0 z-40 mt-2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[10px] font-medium text-zinc-100 opacity-0 shadow-lg ring-1 ring-white/10 transition-opacity group-hover:opacity-100">
-                  You can drag-and-drop to reorder.
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -703,26 +521,7 @@ export function ListDetailClient({
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6">
             {filtered.map((item) => (
-              <div
-                key={item.id}
-                data-drag-card="true"
-                className={`group relative rounded-lg transition-all ${
-                  manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
-                }`}
-                onDragOver={(event) => {
-                  if (manageMode && isOwner) event.preventDefault();
-                }}
-                onDragEnter={() => {
-                  if (manageMode && isOwner) setDragOverId(item.id);
-                }}
-                onDragLeave={() => {
-                  if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
-                }}
-                onDrop={() => {
-                  if (draggedId === item.id) return;
-                  handleDrop(item.id);
-                }}
-              >
+              <div key={item.id} className="group relative rounded-lg transition-all">
                 {showRanks && (
                   <div className="absolute left-1/2 top-0 z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-[48%] items-center justify-center rounded-full border-2 border-white bg-zinc-900 px-1 text-[11px] font-bold text-white shadow-lg">
                     {item.rank}
@@ -733,9 +532,7 @@ export function ListDetailClient({
                   <div>
                     <Link
                       href={item.href}
-                      className={`group relative block overflow-hidden rounded-lg bg-zinc-900 ${
-                        manageMode && isOwner ? "cursor-grab active:cursor-grabbing" : ""
-                      }`}
+                      className="group relative block overflow-hidden rounded-lg bg-zinc-900"
                     >
                       <div className="relative aspect-[2/3]">
                         {item.posterUrl ? (
@@ -761,37 +558,24 @@ export function ListDetailClient({
                     </Link>
                   </div>
                 ) : (
-                  <div
-                    className={
-                      manageMode && isOwner ? "cursor-grab active:cursor-grabbing" : undefined
-                    }
-                  >
-                    <MediaCard
-                      title={item.title}
-                      primaryText={item.title}
-                      secondaryText={getItemMeta(item) || undefined}
-                      href={item.href}
-                      backdropUrl={item.backdropUrl}
-                      posterUrl={item.posterUrl}
-                      rating={item.rating}
-                      mediaType={item.mediaType}
-                      ids={item.ids}
-                      variant="poster"
-                      showInlineActions
-                      disableHover={manageMode}
-                      squareBottom={true}
-                    />
-                  </div>
-                )}
-
-                {manageMode && isOwner && (
-                  <div
-                    draggable
-                    onDragStart={(event) => beginDrag(event, item)}
-                    onDragEnd={finishDrag}
-                    className="absolute inset-0 z-30 cursor-grab rounded-lg active:cursor-grabbing"
-                    aria-label={`Drag ${item.title}`}
-                    title={`Drag ${item.title}`}
+                  <MediaCard
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    meta={item.meta}
+                    primaryText={item.primaryText ?? item.title}
+                    secondaryText={item.secondaryText ?? getItemMeta(item) ?? undefined}
+                    href={item.href}
+                    showHref={item.showHref}
+                    backdropUrl={item.backdropUrl}
+                    posterUrl={item.posterUrl}
+                    rating={item.rating}
+                    mediaType={item.mediaType}
+                    ids={item.ids}
+                    episodeIds={item.episodeIds}
+                    variant="poster"
+                    showInlineActions
+                    squareBottom={true}
+                    note={item.notes}
                   />
                 )}
               </div>
@@ -805,23 +589,7 @@ export function ListDetailClient({
           {filtered.map((item) => (
             <div
               key={item.id}
-              data-drag-card="true"
-              className={`group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05] ${
-                manageMode && isOwner && dragOverId === item.id ? "ring-2 ring-cyan-400/70" : ""
-              }`}
-              onDragOver={(event) => {
-                if (manageMode && isOwner) event.preventDefault();
-              }}
-              onDragEnter={() => {
-                if (manageMode && isOwner) setDragOverId(item.id);
-              }}
-              onDragLeave={() => {
-                if (manageMode && isOwner && dragOverId === item.id) setDragOverId(null);
-              }}
-              onDrop={() => {
-                if (draggedId === item.id) return;
-                handleDrop(item.id);
-              }}
+              className="group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05]"
             >
               {showRanks && (
                 <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
@@ -859,11 +627,27 @@ export function ListDetailClient({
                     </span>
                   )}
                   <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-300">
-                    {item.type === "movie" ? "Film" : item.type === "show" ? "TV" : "Person"}
+                    {item.type === "movie"
+                      ? "Film"
+                      : item.type === "episode"
+                        ? "Episode"
+                        : item.type === "show"
+                          ? "TV"
+                          : item.type === "season"
+                            ? "Season"
+                            : "Person"}
                   </span>
                   {item.genres.length > 0 && (
                     <span className="hidden rounded-full bg-white/[0.04] px-2 py-1 text-zinc-400 sm:inline">
                       {item.genres.slice(0, 2).join(", ")}
+                    </span>
+                  )}
+                  {item.notes && (
+                    <span
+                      title={item.notes}
+                      className="rounded-full bg-amber-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-300"
+                    >
+                      Notes
                     </span>
                   )}
                 </div>
@@ -886,17 +670,6 @@ export function ListDetailClient({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
-              )}
-
-              {manageMode && isOwner && (
-                <div
-                  draggable
-                  onDragStart={(event) => beginDrag(event, item)}
-                  onDragEnd={finishDrag}
-                  className="absolute inset-0 z-20 cursor-grab rounded-lg active:cursor-grabbing"
-                  aria-label={`Drag ${item.title}`}
-                  title={`Drag ${item.title}`}
-                />
               )}
             </div>
           ))}

@@ -68,6 +68,7 @@ type ListedItem = {
     runtime?: number;
     rating?: number;
     genres?: string[];
+    images?: Record<string, unknown> | null;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   show?: {
@@ -76,16 +77,21 @@ type ListedItem = {
     rating?: number;
     genres?: string[];
     runtime?: number;
+    images?: Record<string, unknown> | null;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   season?: {
     number?: number;
+    title?: string;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   episode?: {
     title?: string;
     season?: number;
     number?: number;
+    first_aired?: string;
+    rating?: number;
+    images?: Record<string, unknown> | null;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
   };
   person?: {
@@ -205,11 +211,17 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         item.season?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
-        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
+        ? fetchTmdbImages(
+            tmdbId,
+            tmdbType as "movie" | "tv",
+            item.episode?.season ?? item.season?.number,
+            item.episode?.number,
+          ).catch(() => ({
             poster: null,
             backdrop: null,
+            still: null,
           }))
-        : { poster: null, backdrop: null };
+        : { poster: null, backdrop: null, still: null };
     }),
   );
 
@@ -224,9 +236,26 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
 
   const serialized = items.map((item, i) => {
     const showSlug = item.show?.ids?.slug;
+    const showTitle = item.show?.title;
+    const episodeLabel =
+      item.episode != null
+        ? `${item.episode.season}x${String(item.episode.number ?? 0).padStart(2, "0")} ${item.episode.title ?? ""}`.trim()
+        : undefined;
+    const itemId =
+      item.id != null
+        ? `list-item-${item.id}`
+        : `${item.type ?? "item"}-${item.movie?.ids?.trakt ?? item.show?.ids?.trakt ?? item.episode?.ids?.trakt ?? item.season?.ids?.trakt ?? item.person?.ids?.trakt ?? i}`;
+    const seasonHref =
+      item.season?.number != null ? `/shows/${showSlug}/seasons/${item.season.number}` : undefined;
+    const episodeHref =
+      item.episode != null
+        ? `/shows/${showSlug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
+        : undefined;
 
     return {
-      id: item.id ?? item.rank ?? i,
+      id: itemId,
+      listItemId: item.id,
+      sourceRank: item.rank ?? i + 1,
       rank: i + 1,
       listedAt: item.listed_at ?? "",
       notes: item.notes ?? null,
@@ -239,32 +268,44 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
         item.person?.name ??
         "Unknown",
       year: item.movie?.year ?? item.show?.year,
-      rating: item.movie?.rating ?? item.show?.rating,
+      rating: item.movie?.rating ?? item.show?.rating ?? item.episode?.rating,
       runtime: item.movie?.runtime ?? item.show?.runtime,
       href:
         item.type === "person"
           ? `/people/${item.person?.ids?.slug ?? item.person?.ids?.trakt}`
           : item.movie
             ? `/movies/${item.movie.ids?.slug}`
-            : item.show
-              ? `/shows/${showSlug}`
-              : item.episode?.ids?.slug
-                ? `/shows/${showSlug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
-                : `/shows/${showSlug}/seasons/${item.season?.number}`,
+            : item.episode
+              ? (episodeHref ?? `/shows/${showSlug}`)
+              : item.show
+                ? `/shows/${showSlug}`
+                : (seasonHref ?? `/shows/${showSlug}`),
+      showHref: item.episode ? `/shows/${showSlug}` : undefined,
+      subtitle: item.episode ? showTitle : undefined,
+      meta: item.episode?.first_aired
+        ? new Date(item.episode.first_aired).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : undefined,
+      primaryText: item.episode ? episodeLabel : undefined,
+      secondaryText: item.episode
+        ? showTitle
+        : item.season?.number != null
+          ? `Season ${item.season.number}`
+          : undefined,
       posterUrl: images[i]?.poster ?? null,
-      backdropUrl: images[i]?.backdrop ?? null,
+      backdropUrl: images[i]?.still ?? images[i]?.backdrop ?? null,
       mediaType: item.movie
         ? ("movies" as const)
-        : item.show
-          ? ("shows" as const)
-          : ("movies" as const),
-      ids:
-        item.movie?.ids ??
-        item.show?.ids ??
-        item.episode?.ids ??
-        item.season?.ids ??
-        item.person?.ids ??
-        {},
+        : item.episode
+          ? ("episodes" as const)
+          : item.show
+            ? ("shows" as const)
+            : ("movies" as const),
+      ids: item.show?.ids ?? item.movie?.ids ?? item.season?.ids ?? item.person?.ids ?? {},
+      episodeIds: item.episode?.ids ?? undefined,
       genres: item.movie?.genres ?? item.show?.genres ?? [],
     };
   });

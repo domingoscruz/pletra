@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getUserProfileData } from "@/lib/metadata";
+import { getUserDisplayName, getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { fetchTmdbImages } from "@/lib/tmdb";
@@ -20,10 +20,10 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const profile = await getUserProfileData(slug);
-  const username = profile?.username ?? slug;
+  const displayName = getUserDisplayName(profile, slug);
 
   return {
-    title: `${username}'s ratings - Pletra`,
+    title: `${displayName}'s ratings - Pletra`,
   };
 }
 
