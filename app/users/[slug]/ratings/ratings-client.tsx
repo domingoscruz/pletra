@@ -10,6 +10,7 @@ import { RatingInput } from "@/components/media/rating-input";
 import { useSettings } from "@/lib/settings";
 import { useNavigate } from "@/lib/use-navigate";
 import { RatingsSummaryChart } from "../ratings-summary-chart";
+import { cn } from "@/lib/utils";
 
 type RatingEntry = {
   id: number;
@@ -91,6 +92,97 @@ const RATING_LABELS = [
   "Totally Ninja!",
 ];
 
+function getPaginationWindow(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+
+  if (currentPage <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(totalPages - 2);
+    pages.add(totalPages - 1);
+  }
+
+  if (currentPage >= totalPages - 2) {
+    pages.add(totalPages - 1);
+    pages.add(totalPages - 2);
+    pages.add(2);
+    pages.add(3);
+  }
+
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+}
+
+function RatingsPagination({
+  currentPage,
+  totalPages,
+  isPending,
+  paginationPages,
+  onNavigate,
+}: {
+  currentPage: number;
+  totalPages: number;
+  isPending: boolean;
+  paginationPages: number[];
+  onNavigate: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex items-center justify-center gap-3 text-white">
+      <button
+        onClick={() => onNavigate(currentPage - 1)}
+        disabled={currentPage <= 1 || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Previous page"
+      >
+        <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+        </svg>
+      </button>
+      <div className="flex items-center gap-2">
+        {paginationPages.map((page, index) => {
+          const previousPage = paginationPages[index - 1];
+          const showEllipsis = previousPage && page - previousPage > 1;
+
+          return (
+            <div key={page} className="flex items-center gap-2">
+              {showEllipsis && <span className="px-2 text-zinc-500">.....</span>}
+              <button
+                onClick={() => onNavigate(page)}
+                disabled={isPending || page === currentPage}
+                className={cn(
+                  "flex h-10 min-w-10 items-center justify-center px-3 text-lg font-bold transition-colors",
+                  page === currentPage
+                    ? "bg-[#b65fe0] text-white"
+                    : "text-white hover:text-[#d9a2f0]",
+                )}
+                aria-label={`Page ${page}`}
+              >
+                {page}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        onClick={() => onNavigate(currentPage + 1)}
+        disabled={currentPage >= totalPages || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Next page"
+      >
+        <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m8.59 16.59 1.41 1.41L16 12 10 6 8.59 7.41 13.17 12z" />
+        </svg>
+      </button>
+    </div>
+  );
+}
 function getLocalDateKey(dateStr: string) {
   const date = new Date(dateStr);
   const year = date.getFullYear();
@@ -143,6 +235,10 @@ export function RatingsClient({
   const [searchInput, setSearchInput] = useState(activeSearch);
   const [showDates, setShowDates] = useState(true);
   const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const paginationPages = useMemo(
+    () => getPaginationWindow(currentPage, totalPages),
+    [currentPage, totalPages],
+  );
 
   const navigate = useCallback(
     (overrides: {
@@ -397,6 +493,14 @@ export function RatingsClient({
         </div>
       </div>
 
+      <RatingsPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        isPending={isPending}
+        paginationPages={paginationPages}
+        onNavigate={(page) => navigate({ page })}
+      />
+
       {isFiltered && (
         <p className="text-[11px] text-zinc-600">
           {filteredCount} of {totalItems} items
@@ -452,27 +556,15 @@ export function RatingsClient({
         renderListItems(items)
       )}
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-4">
-          <button
-            onClick={() => navigate({ page: currentPage - 1 })}
-            disabled={currentPage <= 1}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            ← Previous
-          </button>
-          <span className="text-xs tabular-nums text-zinc-500">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => navigate({ page: currentPage + 1 })}
-            disabled={currentPage >= totalPages}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            Next →
-          </button>
-        </div>
-      )}
+      <div className="pt-4">
+        <RatingsPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          isPending={isPending}
+          paginationPages={paginationPages}
+          onNavigate={(page) => navigate({ page })}
+        />
+      </div>
     </div>
   );
 }

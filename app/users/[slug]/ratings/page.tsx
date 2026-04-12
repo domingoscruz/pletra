@@ -70,6 +70,55 @@ const RATING_LABELS = [
   "Totally Ninja!",
 ];
 
+function getMostRecentRatedDayKeys(items: RatedItem[], limit: number) {
+  const dayKeys = new Set<string>();
+
+  for (const item of [...items].sort(
+    (a, b) => new Date(b.rated_at ?? 0).getTime() - new Date(a.rated_at ?? 0).getTime(),
+  )) {
+    const dayKey = item.rated_at?.slice(0, 10);
+    if (!dayKey) continue;
+
+    dayKeys.add(dayKey);
+    if (dayKeys.size >= limit) break;
+  }
+
+  return dayKeys;
+}
+
+function paginateWithRecentLeadPage(
+  items: RatedItem[],
+  page: number,
+  recentDayLimit: number,
+  pageSize: number,
+) {
+  const recentDayKeys = getMostRecentRatedDayKeys(items, recentDayLimit);
+  const firstPageItems = items.filter((item) =>
+    recentDayKeys.has(item.rated_at?.slice(0, 10) ?? ""),
+  );
+  const remainingItems = items.filter(
+    (item) => !recentDayKeys.has(item.rated_at?.slice(0, 10) ?? ""),
+  );
+  const totalPages = Math.max(1, 1 + Math.ceil(remainingItems.length / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+
+  if (safePage === 1) {
+    return {
+      items: firstPageItems,
+      safePage,
+      totalPages,
+    };
+  }
+
+  const startIndex = (safePage - 2) * pageSize;
+
+  return {
+    items: remainingItems.slice(startIndex, startIndex + pageSize),
+    safePage,
+    totalPages,
+  };
+}
+
 export default async function RatingsPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -79,6 +128,9 @@ export default async function RatingsPage({ params, searchParams }: Props) {
   const ratingFilter = sp.rating ?? "";
   const sortBy = sp.sort ?? "recent";
   const searchQuery = sp.q ?? "";
+  const recentDayLimit = 14;
+  const usesRecentLeadPage =
+    type === "all" && !genreFilter && !ratingFilter && !searchQuery && sortBy === "recent";
   let allItems: RatedItem[] = [];
 
   try {
@@ -195,9 +247,21 @@ export default async function RatingsPage({ params, searchParams }: Props) {
     }
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
-  const safePage = Math.min(page, totalPages);
-  const pageItems = filteredItems.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
+  let totalPages = Math.max(1, Math.ceil(filteredItems.length / ITEMS_PER_PAGE));
+  let safePage = Math.min(page, totalPages);
+  let pageItems = filteredItems.slice((safePage - 1) * ITEMS_PER_PAGE, safePage * ITEMS_PER_PAGE);
+
+  if (usesRecentLeadPage) {
+    const paginatedResult = paginateWithRecentLeadPage(
+      filteredItems,
+      page,
+      recentDayLimit,
+      ITEMS_PER_PAGE,
+    );
+    totalPages = paginatedResult.totalPages;
+    safePage = paginatedResult.safePage;
+    pageItems = paginatedResult.items;
+  }
 
   const images = await Promise.all(
     pageItems.map((item) => {

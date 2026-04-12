@@ -36,7 +36,7 @@ export const SPECIAL_TAG_COLORS: Record<string, string> = {
   "Mid Season Finale": "bg-[#2444bf]",
   "Season Finale": "bg-[#9810fa]",
   "Series Finale": "bg-[#ef4444]",
-  "New Episode": "bg-[#9810fa]",
+  "New Episode": "bg-[#06b6d4]",
 };
 
 export interface MediaCardProps {
@@ -472,7 +472,7 @@ export function MediaCard({
             className="group/progress absolute inset-x-0 bottom-0 z-50 h-[4px] cursor-default transition-all hover:h-[8px]"
           >
             <div
-              className="h-full bg-red-600 shadow-[0_0_8px_rgba(239,68,68,0.4)] transition-all duration-300 group-hover/progress:bg-red-500"
+              className="h-full bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.4)] transition-all duration-300 group-hover/progress:bg-purple-500"
               style={{ width: `${percentage}%` }}
             />
           </div>
@@ -486,6 +486,7 @@ export function MediaCard({
             ids={ids}
             episodeIds={episodeIds}
             historyId={historyId}
+            progress={progress}
             eventItem={{
               title,
               subtitle: typeof subtitle === "string" ? subtitle : undefined,
@@ -612,7 +613,7 @@ export function MediaCard({
             style={{ top: `${targetY - 35}px`, left: `${targetX}px` }}
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-red-500">{percentage}% Watched</span>
+              <span className="text-purple-400">{percentage}% Watched</span>
               <span className="text-zinc-600">•</span>
               <span>
                 {remaining} {remaining === 1 ? "Episode" : "Episodes"} Left

@@ -80,6 +80,24 @@ type EpisodeMetadata = {
   isLastSeason: boolean;
 };
 
+function isKnownHistoryDate(value?: string | null) {
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  return date.getTime() > 24 * 60 * 60 * 1000;
+}
+
+function formatHistoryTimeLabel(value?: string | null) {
+  if (!isKnownHistoryDate(value)) return "Unknown Date";
+
+  return new Date(value ?? "").toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function getEpisodeSpecialTag(item: HistoryItem, metadata?: EpisodeMetadata) {
   const season = item.episode?.season;
   const number = item.episode?.number;
@@ -175,6 +193,114 @@ function getMonthRange(day: string) {
   return {
     start_at: start.toISOString(),
     end_at: end.toISOString(),
+  };
+}
+
+const HISTORY_ALL_PAGE_SIZE = 100;
+
+function parsePaginationHeader(
+  headers: { get?: (key: string) => string | null } | undefined,
+  key: string,
+) {
+  return parseInt(String(headers?.get?.(key) ?? "0"), 10) || 0;
+}
+
+async function fetchHistoryAllPage(
+  client: ReturnType<typeof createTraktClient>,
+  slug: string,
+  page: number,
+  extraQuery: Record<string, unknown> = {},
+) {
+  const res = await client.users.history.all({
+    params: { id: slug },
+    query: {
+      page,
+      limit: HISTORY_ALL_PAGE_SIZE,
+      extended: "full,images" as any,
+      ...extraQuery,
+    },
+  });
+
+  return {
+    items: res.status === 200 ? (res.body as HistoryItem[]) : [],
+    totalItems: parsePaginationHeader(res.headers, "x-pagination-item-count"),
+    totalPages: parsePaginationHeader(res.headers, "x-pagination-page-count"),
+  };
+}
+
+async function fetchRecentLeadHistoryPage(
+  client: ReturnType<typeof createTraktClient>,
+  slug: string,
+  page: number,
+  recentDayLimit: number,
+  pageSize: number,
+) {
+  const firstApiPage = await fetchHistoryAllPage(client, slug, 1);
+  const totalItems = firstApiPage.totalItems;
+  const selectedDayKeys: string[] = [];
+  const selectedDaySet = new Set<string>();
+  const firstPageItems: HistoryItem[] = [];
+  let apiPage = 1;
+  let currentItems = firstApiPage.items;
+  let stop = false;
+
+  while (!stop && currentItems.length > 0) {
+    for (const item of currentItems) {
+      const dayKey = item.watched_at?.slice(0, 10);
+      if (!dayKey) continue;
+
+      if (!selectedDaySet.has(dayKey)) {
+        if (selectedDayKeys.length >= recentDayLimit) {
+          stop = true;
+          break;
+        }
+
+        selectedDayKeys.push(dayKey);
+        selectedDaySet.add(dayKey);
+      }
+
+      firstPageItems.push(item);
+    }
+
+    if (stop) break;
+    apiPage += 1;
+    if (apiPage > firstApiPage.totalPages) break;
+    currentItems = (await fetchHistoryAllPage(client, slug, apiPage)).items;
+  }
+
+  const remainingCount = Math.max(0, totalItems - firstPageItems.length);
+  const totalPages = Math.max(1, 1 + Math.ceil(remainingCount / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+
+  if (safePage === 1) {
+    return {
+      items: firstPageItems,
+      safePage,
+      totalPages,
+      totalItems,
+    };
+  }
+
+  const offset = firstPageItems.length + (safePage - 2) * pageSize;
+  const startApiPage = Math.floor(offset / HISTORY_ALL_PAGE_SIZE) + 1;
+  const startIndex = offset % HISTORY_ALL_PAGE_SIZE;
+  const paginatedItems: HistoryItem[] = [];
+  let fetchPage = startApiPage;
+  let firstSliceIndex = startIndex;
+
+  while (paginatedItems.length < pageSize && fetchPage <= firstApiPage.totalPages) {
+    const pageResult = await fetchHistoryAllPage(client, slug, fetchPage);
+    const slice = pageResult.items.slice(firstSliceIndex);
+    paginatedItems.push(...slice);
+    fetchPage += 1;
+    firstSliceIndex = 0;
+  }
+
+  return {
+    items: paginatedItems.slice(0, pageSize),
+    safePage,
+    totalPages,
+    totalItems,
   };
 }
 
@@ -392,6 +518,8 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   const dayFilter = sp.day ?? "";
   const searchQuery = sp.q ?? "";
   const limit = 42;
+  const recentDayLimit = 14;
+  const usesRecentLeadPage = type === "all" && !dayFilter && !searchQuery && sortBy === "newest";
   let items: HistoryItem[] = [];
   let totalPages = 1;
   let totalItems = 0;
@@ -441,49 +569,26 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         }
       }
     } else {
-      const [movieRes, showRes] = await Promise.all([
-        client.users.history.movies({
-          params: { id: slug },
-          query: dayFilter
-            ? { page: 1, limit: 250, extended: "full,images" as any, ...dateRange }
-            : { page, limit: Math.ceil(limit / 2), extended: "full,images" as any },
-        }),
-        client.users.history.shows({
-          params: { id: slug },
-          query: dayFilter
-            ? { page: 1, limit: 250, extended: "full,images" as any, ...dateRange }
-            : { page, limit: Math.ceil(limit / 2), extended: "full,images" as any },
-        }),
-      ]);
-
-      const movies = movieRes.status === 200 ? (movieRes.body as HistoryItem[]) : [];
-      const shows = showRes.status === 200 ? (showRes.body as HistoryItem[]) : [];
-
-      items = [...movies, ...shows].sort(
-        (a, b) => new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime(),
-      );
-
       if (dayFilter) {
+        const allRes = await fetchHistoryAllPage(client, slug, 1, dateRange);
+        items = allRes.items;
         totalItems = items.length;
+      } else if (usesRecentLeadPage) {
+        const paginatedResult = await fetchRecentLeadHistoryPage(
+          client,
+          slug,
+          page,
+          recentDayLimit,
+          limit,
+        );
+        items = paginatedResult.items;
+        totalItems = paginatedResult.totalItems;
+        totalPages = paginatedResult.totalPages;
       } else {
-        const movieTotal = parseInt(
-          String(
-            (movieRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-              "x-pagination-page-count",
-            ) ?? "1",
-          ),
-          10,
-        );
-        const showTotal = parseInt(
-          String(
-            (showRes as { headers?: { get?: (k: string) => string } }).headers?.get?.(
-              "x-pagination-page-count",
-            ) ?? "1",
-          ),
-          10,
-        );
-        totalPages = Math.max(movieTotal, showTotal);
-        totalItems = items.length;
+        const allRes = await fetchHistoryAllPage(client, slug, page);
+        items = allRes.items;
+        totalItems = allRes.totalItems;
+        totalPages = allRes.totalPages;
       }
     }
   } catch (error) {
@@ -557,6 +662,10 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         return new Date(b.watched_at ?? 0).getTime() - new Date(a.watched_at ?? 0).getTime();
     }
   });
+
+  let safePage = page;
+
+  safePage = Math.min(Math.max(page, 1), Math.max(totalPages, 1));
 
   const uniqueShowSlugs = Array.from(
     new Set(items.map((item) => item.show?.ids?.slug).filter(Boolean)),
@@ -637,11 +746,8 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     return {
       id: item.id ?? i,
       historyId: item.id,
-      watched_at: item.watched_at ?? "",
-      timeLabel: new Date(item.watched_at ?? "").toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
+      watched_at: isKnownHistoryDate(item.watched_at) ? (item.watched_at ?? "") : "",
+      timeLabel: formatHistoryTimeLabel(item.watched_at),
       type: item.movie ? ("movie" as const) : ("show" as const),
       title: item.movie?.title ?? item.show?.title ?? "Unknown",
       year: item.movie?.year ?? item.show?.year,
@@ -699,7 +805,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       items={serializedItems}
       slug={slug}
       currentType={type}
-      currentPage={page}
+      currentPage={safePage}
       totalPages={totalPages}
       totalItems={totalItems}
       activeDay={dayFilter}

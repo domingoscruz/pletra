@@ -35,7 +35,7 @@ export function ProfileTabs({ slug, isOwnProfile }: { slug: string; isOwnProfile
               }`}
             >
               {tab.label}
-              {isActive && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-accent" />}
+              {isActive && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-purple-500" />}
             </Link>
           );
         })}

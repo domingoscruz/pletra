@@ -10,6 +10,7 @@ import { RatingInput } from "@/components/media/rating-input";
 import { Last30DaysChart } from "../last-30-days-chart";
 import { useSettings } from "@/lib/settings";
 import { useNavigate } from "@/lib/use-navigate";
+import { cn } from "@/lib/utils";
 
 type HistoryEntry = {
   id: number;
@@ -130,7 +131,13 @@ function formatDuration(minutes: number) {
 }
 
 function formatDayHeading(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+  const date = new Date(dateStr);
+
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 24 * 60 * 60 * 1000) {
+    return "Unknown Date";
+  }
+
+  return date.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -150,6 +157,97 @@ function RatingRibbonChip({ rating }: { rating: number }) {
   );
 }
 
+function getPaginationWindow(currentPage: number, totalPages: number) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+
+  if (currentPage <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(totalPages - 2);
+    pages.add(totalPages - 1);
+  }
+
+  if (currentPage >= totalPages - 2) {
+    pages.add(totalPages - 1);
+    pages.add(totalPages - 2);
+    pages.add(2);
+    pages.add(3);
+  }
+
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b);
+}
+
+function HistoryPagination({
+  currentPage,
+  totalPages,
+  isPending,
+  paginationPages,
+  onNavigate,
+}: {
+  currentPage: number;
+  totalPages: number;
+  isPending: boolean;
+  paginationPages: number[];
+  onNavigate: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex items-center justify-center gap-3 text-white">
+      <button
+        onClick={() => onNavigate(currentPage - 1)}
+        disabled={currentPage <= 1 || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Previous page"
+      >
+        <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+        </svg>
+      </button>
+      <div className="flex items-center gap-2">
+        {paginationPages.map((page, index) => {
+          const previousPage = paginationPages[index - 1];
+          const showEllipsis = previousPage && page - previousPage > 1;
+
+          return (
+            <div key={page} className="flex items-center gap-2">
+              {showEllipsis && <span className="px-2 text-zinc-500">.....</span>}
+              <button
+                onClick={() => onNavigate(page)}
+                disabled={isPending || page === currentPage}
+                className={cn(
+                  "flex h-10 min-w-10 items-center justify-center px-3 text-lg font-bold transition-colors",
+                  page === currentPage
+                    ? "bg-[#b65fe0] text-white"
+                    : "text-white hover:text-[#d9a2f0]",
+                )}
+                aria-label={`Page ${page}`}
+              >
+                {page}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        onClick={() => onNavigate(currentPage + 1)}
+        disabled={currentPage >= totalPages || isPending}
+        className="flex h-10 w-10 items-center justify-center text-zinc-400 transition-colors hover:text-white disabled:opacity-20"
+        aria-label="Next page"
+      >
+        <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m8.59 16.59 1.41 1.41L16 12 10 6 8.59 7.41 13.17 12z" />
+        </svg>
+      </button>
+    </div>
+  );
+}
 export function HistoryClient({
   items,
   slug,
@@ -167,8 +265,13 @@ export function HistoryClient({
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [searchInput, setSearchInput] = useState(activeSearch);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const daySectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const paginationPages = useMemo(
+    () => getPaginationWindow(currentPage, totalPages),
+    [currentPage, totalPages],
+  );
 
   const navigate = useCallback(
     (overrides: { type?: string; page?: number; sort?: string; q?: string; day?: string }) => {
@@ -247,8 +350,32 @@ export function HistoryClient({
     if (!activeDay) return;
     const target = daySectionRefs.current[activeDay];
     if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    setCollapsedGroups((current) => {
+      if (!current.has(activeDay)) return current;
+      const next = new Set(current);
+      next.delete(activeDay);
+      return next;
+    });
+
+    requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }, [activeDay, grouped.length, view]);
+
+  const toggleGroup = useCallback(
+    (groupKey: string) => {
+      setCollapsedGroups((current) => {
+        const next = new Set(current);
+        if (next.has(groupKey)) {
+          next.delete(groupKey);
+        } else {
+          next.add(groupKey);
+        }
+        return next;
+      });
+    },
+    [setCollapsedGroups],
+  );
 
   return (
     <div className={`space-y-6 ${isPending ? "opacity-60 transition-opacity" : ""}`}>
@@ -345,6 +472,16 @@ export function HistoryClient({
         </div>
       </div>
 
+      {!activeDay ? (
+        <HistoryPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          isPending={isPending}
+          paginationPages={paginationPages}
+          onNavigate={(page) => navigate({ page })}
+        />
+      ) : null}
+
       {activeDay ? (
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-2xl border border-cyan-400/15 bg-cyan-500/8 px-4 py-3 text-sm text-zinc-300">
           <div className="flex justify-start">
@@ -378,66 +515,81 @@ export function HistoryClient({
         <div className="space-y-9">
           {grouped.map((group) => (
             <section key={group.key} className="space-y-4">
-              <div
-                ref={(node) => {
-                  daySectionRefs.current[group.key] = node;
-                }}
-              />
-              <div
-                className={`flex items-center gap-3 border-b pb-2 ${
-                  activeDay === group.key ? "border-cyan-400/30" : "border-white/8"
-                }`}
-              >
-                <div className="flex h-7 w-7 items-center justify-center text-zinc-200">
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    viewBox="0 0 24 24"
-                  >
-                    <circle cx="12" cy="12" r="9" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
-                  </svg>
-                </div>
-                <h3
-                  className={`text-lg font-black tracking-tight ${
-                    activeDay === group.key ? "text-cyan-200" : "text-white"
-                  }`}
-                >
-                  {group.label}
-                </h3>
-                <div className="h-px flex-1 bg-white/8" />
-                <span className="text-sm tabular-nums text-zinc-400">
-                  {formatDuration(group.totalRuntime)}
-                </span>
-              </div>
+              {(() => {
+                const isCollapsed = collapsedGroups.has(group.key);
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {group.items.map((item, i) => (
-                  <MediaCard
-                    key={`${item.id}-${item.watched_at}-${i}`}
-                    title={item.title}
-                    subtitle={item.subtitle ?? item.timeLabel}
-                    meta={item.timeLabel}
-                    href={item.href}
-                    showHref={item.showHref}
-                    backdropUrl={item.backdropUrl}
-                    posterUrl={item.posterUrl}
-                    rating={item.rating}
-                    userRating={item.userRating}
-                    mediaType={item.mediaType}
-                    ids={item.ids}
-                    episodeIds={item.episodeIds}
-                    specialTag={item.specialTag}
-                    historyId={item.historyId}
-                    watchedAt={item.watchedAt}
-                    isWatched={item.isWatched}
-                    variant="poster"
-                    showInlineActions
-                  />
-                ))}
-              </div>
+                return (
+                  <>
+                    <div
+                      ref={(node) => {
+                        daySectionRefs.current[group.key] = node;
+                      }}
+                      className={`scroll-mt-24 flex items-center gap-3 border-b pb-2 ${
+                        activeDay === group.key ? "border-cyan-400/30" : "border-white/8"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.key)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        aria-expanded={!isCollapsed}
+                      >
+                        <div className="flex h-7 w-7 items-center justify-center text-zinc-200">
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.8}
+                            viewBox="0 0 24 24"
+                          >
+                            <circle cx="12" cy="12" r="9" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+                          </svg>
+                        </div>
+                        <h3
+                          className={`text-lg font-black tracking-tight ${
+                            activeDay === group.key ? "text-cyan-200" : "text-white"
+                          }`}
+                        >
+                          {group.label}
+                        </h3>
+                      </button>
+                      <div className="h-px flex-1 bg-white/8" />
+                      <span className="text-sm tabular-nums text-zinc-400">
+                        {formatDuration(group.totalRuntime)}
+                      </span>
+                    </div>
+
+                    {!isCollapsed ? (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                        {group.items.map((item, i) => (
+                          <MediaCard
+                            key={`${item.id}-${item.watched_at}-${i}`}
+                            title={item.title}
+                            subtitle={item.subtitle}
+                            meta={item.timeLabel}
+                            href={item.href}
+                            showHref={item.showHref}
+                            backdropUrl={item.backdropUrl}
+                            posterUrl={item.posterUrl}
+                            rating={item.rating}
+                            userRating={item.userRating}
+                            mediaType={item.mediaType}
+                            ids={item.ids}
+                            episodeIds={item.episodeIds}
+                            specialTag={item.specialTag}
+                            historyId={item.historyId}
+                            watchedAt={item.watchedAt}
+                            isWatched={item.isWatched}
+                            variant="poster"
+                            showInlineActions
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
             </section>
           ))}
         </div>
@@ -445,125 +597,132 @@ export function HistoryClient({
         <div className="space-y-7">
           {grouped.map((group) => (
             <section key={group.key}>
-              <div
-                ref={(node) => {
-                  daySectionRefs.current[group.key] = node;
-                }}
-              />
-              <div
-                className={`mb-3 flex items-center gap-3 border-b pb-2 ${
-                  activeDay === group.key ? "border-cyan-400/30" : "border-white/8"
-                }`}
-              >
-                <h3
-                  className={`text-[12px] font-black uppercase tracking-[0.18em] ${
-                    activeDay === group.key ? "text-cyan-200" : "text-zinc-300"
-                  }`}
-                >
-                  {group.label}
-                </h3>
-                <div className="h-px flex-1 bg-white/8" />
-                <span className="text-[11px] tabular-nums text-zinc-500">
-                  {formatDuration(group.totalRuntime)}
-                </span>
-              </div>
+              {(() => {
+                const isCollapsed = collapsedGroups.has(group.key);
 
-              <div className="space-y-1.5">
-                {group.items.map((item, i) => (
-                  <div
-                    key={`${item.id}-${item.watched_at}-${i}`}
-                    className="group flex items-center gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
-                  >
-                    <Link
-                      href={item.href}
-                      className="relative h-16 w-11 shrink-0 overflow-hidden rounded-md bg-zinc-800"
-                    >
-                      {item.posterUrl ? (
-                        <Image
-                          src={item.posterUrl}
-                          alt={item.title}
-                          fill
-                          className="object-cover"
-                          sizes="44px"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-xs text-zinc-700">
-                          {item.type === "movie" ? "M" : "TV"}
-                        </div>
-                      )}
-                    </Link>
-
-                    <div className="min-w-0 flex-1">
-                      <Link href={item.href} className="block min-w-0">
-                        <p className="truncate text-sm font-semibold text-zinc-100 group-hover:text-white">
-                          {item.subtitle ?? item.title}
-                        </p>
-                      </Link>
-                      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
-                        {item.subtitle && item.showHref ? (
-                          <Link
-                            href={item.showHref}
-                            className="truncate text-zinc-400 transition-colors hover:text-zinc-100 hover:underline"
-                          >
-                            {item.title}
-                          </Link>
-                        ) : (
-                          <span className="truncate">{item.subtitle ? item.title : item.year}</span>
-                        )}
-                        <span className="text-zinc-700">•</span>
-                        <span>{item.timeLabel}</span>
-                      </div>
-                    </div>
-
-                    {item.rating != null && <RatingRibbonChip rating={item.rating} />}
-
-                    <div className="hidden shrink-0 sm:block">
-                      <RatingInput
-                        mediaType={item.mediaType}
-                        ids={item.episodeIds ?? item.ids}
-                        currentRating={item.userRating}
-                        icon="heart"
-                      />
-                    </div>
-
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${
-                        item.type === "movie"
-                          ? "bg-blue-500/10 text-blue-400"
-                          : "bg-purple-500/10 text-purple-400"
+                return (
+                  <>
+                    <div
+                      ref={(node) => {
+                        daySectionRefs.current[group.key] = node;
+                      }}
+                      className={`scroll-mt-24 mb-3 flex items-center gap-3 border-b pb-2 ${
+                        activeDay === group.key ? "border-cyan-400/30" : "border-white/8"
                       }`}
                     >
-                      {item.type === "movie" ? "Film" : "TV"}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.key)}
+                        className="min-w-0 text-left"
+                        aria-expanded={!isCollapsed}
+                      >
+                        <h3
+                          className={`text-[12px] font-black uppercase tracking-[0.18em] ${
+                            activeDay === group.key ? "text-cyan-200" : "text-zinc-300"
+                          }`}
+                        >
+                          {group.label}
+                        </h3>
+                      </button>
+                      <div className="h-px flex-1 bg-white/8" />
+                      <span className="text-[11px] tabular-nums text-zinc-500">
+                        {formatDuration(group.totalRuntime)}
+                      </span>
+                    </div>
+
+                    {!isCollapsed ? (
+                      <div className="space-y-1.5">
+                        {group.items.map((item, i) => (
+                          <div
+                            key={`${item.id}-${item.watched_at}-${i}`}
+                            className="group flex items-center gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+                          >
+                            <Link
+                              href={item.href}
+                              className="relative h-16 w-11 shrink-0 overflow-hidden rounded-md bg-zinc-800"
+                            >
+                              {item.posterUrl ? (
+                                <Image
+                                  src={item.posterUrl}
+                                  alt={item.title}
+                                  fill
+                                  className="object-cover"
+                                  sizes="44px"
+                                />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-xs text-zinc-700">
+                                  {item.type === "movie" ? "M" : "TV"}
+                                </div>
+                              )}
+                            </Link>
+
+                            <div className="min-w-0 flex-1">
+                              <Link href={item.href} className="block min-w-0">
+                                <p className="truncate text-sm font-semibold text-zinc-100 group-hover:text-white">
+                                  {item.subtitle ?? item.title}
+                                </p>
+                              </Link>
+                              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
+                                {item.subtitle && item.showHref ? (
+                                  <Link
+                                    href={item.showHref}
+                                    className="truncate text-zinc-400 transition-colors hover:text-zinc-100 hover:underline"
+                                  >
+                                    {item.title}
+                                  </Link>
+                                ) : (
+                                  <span className="truncate">
+                                    {item.subtitle ? item.title : item.year}
+                                  </span>
+                                )}
+                                <span className="text-zinc-700">•</span>
+                                <span>{item.timeLabel}</span>
+                              </div>
+                            </div>
+
+                            {item.rating != null && <RatingRibbonChip rating={item.rating} />}
+
+                            <div className="hidden shrink-0 sm:block">
+                              <RatingInput
+                                mediaType={item.mediaType}
+                                ids={item.episodeIds ?? item.ids}
+                                currentRating={item.userRating}
+                                icon="heart"
+                              />
+                            </div>
+
+                            <span
+                              className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase ${
+                                item.type === "movie"
+                                  ? "bg-blue-500/10 text-blue-400"
+                                  : "bg-purple-500/10 text-purple-400"
+                              }`}
+                            >
+                              {item.type === "movie" ? "Film" : "TV"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
             </section>
           ))}
         </div>
       )}
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-4">
-          <button
-            onClick={() => navigate({ page: currentPage - 1 })}
-            disabled={currentPage <= 1}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            ← Previous
-          </button>
-          <span className="text-xs tabular-nums text-zinc-500">
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => navigate({ page: currentPage + 1 })}
-            disabled={currentPage >= totalPages}
-            className="cursor-pointer rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-default disabled:opacity-30"
-          >
-            Next →
-          </button>
+      {!activeDay ? (
+        <div className="pt-4">
+          <HistoryPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            isPending={isPending}
+            paginationPages={paginationPages}
+            onNavigate={(page) => navigate({ page })}
+          />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

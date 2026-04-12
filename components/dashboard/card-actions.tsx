@@ -219,6 +219,10 @@ interface CardActionsProps {
   ids: Record<string, any>;
   episodeIds?: Record<string, any>;
   historyId?: number;
+  progress?: {
+    aired: number;
+    completed: number;
+  };
   eventItem?: {
     title: string;
     subtitle?: string;
@@ -251,6 +255,7 @@ export function CardActions({
   ids,
   episodeIds,
   historyId,
+  progress,
   eventItem,
   userRating,
   globalRating,
@@ -276,6 +281,8 @@ export function CardActions({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckHovered, setIsCheckHovered] = useState(false);
+  const [isRatingHovered, setIsRatingHovered] = useState(false);
 
   const [localRating, setLocalRating] = useState<number | undefined>(
     userRating && userRating > 0 ? userRating : undefined,
@@ -307,6 +314,29 @@ export function CardActions({
   const listMembershipType = episodeIds ? "episodes" : mediaType;
   const activeRatingColor = getRibbonColor(localRating);
   const listPayloadKey = episodeIds ? "episodes" : mediaType;
+  const watchedProgressPercentage =
+    progress && progress.aired > 0
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            progress.completed >= progress.aired
+              ? 100
+              : Math.floor((progress.completed / progress.aired) * 100),
+          ),
+        )
+      : watched
+        ? 100
+        : 0;
+  const isProgressTooltipEligible = watched && mediaType !== "episodes" && Boolean(progress?.aired);
+  const watchTooltipLabel = isProgressTooltipEligible
+    ? `${watchedProgressPercentage}% watched`
+    : watched
+      ? "Watched"
+      : "Check-in";
+  const isCheckButtonActive = watched || showWatchOptions || isCheckHovered;
+  const ratingButtonColor =
+    activeRatingColor ?? (isRatingHovered || showRating ? "#f16161" : undefined);
 
   const months = [
     "January",
@@ -1343,8 +1373,14 @@ export function CardActions({
       <div className="flex shrink-0">
         <button
           type="button"
-          onMouseEnter={(e) => handleMouseEnterTooltip(e, watched ? "Watched" : "Check-in")}
-          onMouseLeave={() => setActiveTooltip(null)}
+          onMouseEnter={(e) => {
+            setIsCheckHovered(true);
+            handleMouseEnterTooltip(e, watchTooltipLabel);
+          }}
+          onMouseLeave={() => {
+            setIsCheckHovered(false);
+            setActiveTooltip(null);
+          }}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1356,15 +1392,16 @@ export function CardActions({
           title={watched ? "Open history actions" : "Open watch actions"}
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center rounded-bl-lg transition-all",
-            watched ? "bg-[#2d7a30]" : "bg-purple-600 hover:bg-purple-500",
+            isCheckButtonActive ? "bg-purple-600 text-white" : "bg-zinc-800 hover:bg-purple-600",
           )}
         >
           <svg
-            className="h-[1.35rem] w-[1.35rem] text-white"
+            className="h-[1.35rem] w-[1.35rem]"
             fill="none"
             stroke="currentColor"
             strokeWidth={3}
             viewBox="0 0 24 24"
+            style={isCheckButtonActive ? undefined : { color: "#9333ea" }}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
@@ -1386,7 +1423,7 @@ export function CardActions({
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all border-l border-white/10",
             inWatchlist || inPersonalLists
               ? "bg-[#23a5dd] text-white"
-              : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
+              : "bg-zinc-800 text-zinc-500 hover:bg-[#23a5dd] hover:text-white",
           )}
         >
           <svg className="h-[1.1rem] w-[1.1rem]" fill="currentColor" viewBox="0 0 24 24">
@@ -1399,10 +1436,14 @@ export function CardActions({
 
       <button
         type="button"
-        onMouseEnter={(e) =>
-          handleMouseEnterTooltip(e, localRating ? `Rating: ${localRating}` : "Rate")
-        }
-        onMouseLeave={() => setActiveTooltip(null)}
+        onMouseEnter={(e) => {
+          setIsRatingHovered(true);
+          handleMouseEnterTooltip(e, localRating ? `Rating: ${localRating}` : "Rate");
+        }}
+        onMouseLeave={() => {
+          setIsRatingHovered(false);
+          setActiveTooltip(null);
+        }}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1424,7 +1465,7 @@ export function CardActions({
         <span className={cn("inline-flex h-4 items-center", localRating ? "gap-0.5" : "gap-1")}>
           <span
             className="flex h-4 w-4 shrink-0 items-center justify-center"
-            style={activeRatingColor ? { color: activeRatingColor } : undefined}
+            style={ratingButtonColor ? { color: ratingButtonColor } : undefined}
           >
             <svg
               className="h-4 w-4"

@@ -582,7 +582,7 @@ export function WatchingToast() {
                 <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">
                   Progress
                 </span>
-                <span className="text-[9px] font-black text-red-500 tabular-nums">
+                <span className="text-[9px] font-black text-purple-400 tabular-nums">
                   {Math.round(smoothProgress)}%
                 </span>
               </div>
@@ -592,7 +592,7 @@ export function WatchingToast() {
             </div>
             <div className="relative h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden ring-1 ring-white/5">
               <div
-                className="h-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.4)] transition-all duration-1000 ease-linear"
+                className="h-full bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.4)] transition-all duration-1000 ease-linear"
                 style={{ width: `${smoothProgress}%` }}
               />
             </div>

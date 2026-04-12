@@ -9,6 +9,7 @@ import {
   useTransition,
   memo,
   type ChangeEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -212,11 +213,17 @@ const formatTooltipDate = (dateString: string): string => {
 
 const getStatusBadgeText = (status?: string) => {
   const normalized = status?.toLowerCase() ?? "";
-  if (normalized === "returning series") return "Returns next season";
-  if (normalized === "in production") return "In production";
+  if (normalized === "returning series") return "Returns Next Season";
+  if (normalized === "in production") return "In Production";
   if (normalized === "ended") return "Ended";
   if (normalized === "canceled" || normalized === "cancelled") return "Canceled";
   return null;
+};
+
+const getStatusBadgeClassName = (badge: string) => {
+  if (badge === "Ended") return "bg-[#6b7280]";
+  if (badge === "Returns Next Season") return "bg-[#06b6d4]";
+  return "bg-purple-600";
 };
 
 type ProgressBarMode = "smart" | "simple";
@@ -504,6 +511,78 @@ const formatSeasonSummary = (season: ProgressSeasonItem) => {
   return `0/${season.aired} episodes - ${remainingEpisodes} remaining (${formatDuration(season.runtimeLeft)})`;
 };
 
+type ProgressTooltipStats = {
+  label?: string;
+  aired: number;
+  completed: number;
+  plays: number;
+  runtimeWatched: number;
+  runtimeLeft: number;
+};
+
+const getProgressTooltipStats = (item: ProgressShowItem): ProgressTooltipStats => {
+  const activeSeason =
+    [...item.seasons]
+      .reverse()
+      .find(
+        (season) => season.aired > 0 && season.completed < season.aired && season.completed > 0,
+      ) ??
+    [...item.seasons]
+      .reverse()
+      .find((season) => season.aired > 0 && season.completed < season.aired);
+
+  if (activeSeason) {
+    return {
+      label: `Season ${activeSeason.season}`,
+      aired: activeSeason.aired,
+      completed: activeSeason.completed,
+      plays: activeSeason.plays,
+      runtimeWatched: activeSeason.runtimeWatched,
+      runtimeLeft: activeSeason.runtimeLeft,
+    };
+  }
+
+  return {
+    aired: item.aired,
+    completed: item.completed,
+    plays: item.plays,
+    runtimeWatched: item.runtimeWatched,
+    runtimeLeft: item.runtimeLeft,
+  };
+};
+
+const renderCheckTooltipContent = (item: ProgressShowItem): ReactNode => {
+  const stats = getProgressTooltipStats(item);
+  const percentage = getProgressPercentage(stats.aired, stats.completed);
+  const remainingEpisodes = Math.max(0, stats.aired - stats.completed);
+  const isComplete = percentage >= 100;
+
+  return (
+    <div className="relative min-w-[170px] rounded-lg border border-white/10 bg-[#101010] px-3 py-2 text-white shadow-2xl">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-[12px] font-black text-white">{percentage}% watched</span>
+        {stats.label ? (
+          <span className="text-[12px] font-black text-purple-300">{stats.label}</span>
+        ) : null}
+      </div>
+      <div className="mt-1 text-[11px] font-semibold text-white">
+        {stats.completed}/{stats.aired} episodes
+      </div>
+      <div className="mt-0.5 text-[11px] font-semibold text-white">
+        {stats.plays} {stats.plays === 1 ? "play" : "plays"}{" "}
+        <span className="italic text-zinc-300">({formatDuration(stats.runtimeWatched)})</span>
+      </div>
+      {!isComplete && remainingEpisodes > 0 ? (
+        <div className="mt-0.5 text-[11px] font-semibold text-zinc-300">
+          {remainingEpisodes} remaining{" "}
+          <span className="italic text-zinc-400">({formatDuration(stats.runtimeLeft)})</span>
+        </div>
+      ) : null}
+      <div className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-8 border-t-8 border-x-transparent border-t-[#101010]" />
+    </div>
+  );
+};
+
 function SeasonEpisodeLink({
   showSlug,
   episode,
@@ -622,7 +701,7 @@ function ActionTooltip({
   isOpen,
   triggerRef,
 }: {
-  label: string;
+  label: ReactNode;
   isOpen: boolean;
   triggerRef: React.RefObject<HTMLElement | null>;
 }) {
@@ -649,10 +728,14 @@ function ActionTooltip({
         transform: "translateY(-100%)",
       }}
     >
-      <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
-        {label}
-        <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
-      </div>
+      {typeof label === "string" ? (
+        <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
+          {label}
+          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
+        </div>
+      ) : (
+        label
+      )}
     </div>,
     document.body,
   );
@@ -1667,11 +1750,6 @@ const ProgressShowRow = memo(
     const percentage = getProgressPercentage(item.aired, item.completed);
     const remainingEpisodes = Math.max(0, item.aired - item.completed);
     const isComplete = percentage >= 100;
-    const areAllSeasonsExpanded =
-      showSeasonBreakdown &&
-      item.seasons.length > 0 &&
-      expandedSeasons.length === item.seasons.length;
-
     const isShowEnded = ["ended", "canceled", "cancelled"].includes(
       item.status?.toLowerCase() ?? "",
     );
@@ -1679,6 +1757,13 @@ const ProgressShowRow = memo(
     const showSeriesRibbon =
       Boolean(item.showUserRating) && (isShowEnded || (isReturning && !next));
     const shouldManageHistory = isComplete && (isShowEnded || (isReturning && !next));
+    const isCheckButtonWatched = shouldManageHistory;
+    const isCheckButtonActive =
+      isCheckButtonWatched || activeMenu === "checkin" || hoveredAction === "checkin";
+    const areAllSeasonsExpanded =
+      showSeasonBreakdown &&
+      item.seasons.length > 0 &&
+      expandedSeasons.length === item.seasons.length;
 
     let statusBadge = null;
     if (isShowEnded && isComplete) {
@@ -2379,7 +2464,12 @@ const ProgressShowRow = memo(
 
                 {statusBadge && (
                   <div className="mb-1.5">
-                    <span className="inline-flex bg-purple-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white">
+                    <span
+                      className={cn(
+                        "inline-flex px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white",
+                        getStatusBadgeClassName(statusBadge),
+                      )}
+                    >
                       {statusBadge}
                     </span>
                   </div>
@@ -2429,10 +2519,8 @@ const ProgressShowRow = memo(
                   setHoveredAction((current) => (current === "checkin" ? null : current))
                 }
                 className={cn(
-                  "flex w-12 items-center justify-center text-white transition-colors",
-                  shouldManageHistory
-                    ? "bg-green-600 hover:bg-green-500"
-                    : "bg-purple-600 hover:bg-purple-500",
+                  "flex w-12 items-center justify-center transition-colors",
+                  isCheckButtonActive ? "bg-purple-600 text-white" : "bg-zinc-800",
                 )}
                 aria-label={shouldManageHistory ? "Open history actions" : "Open watch actions"}
                 title={shouldManageHistory ? "Open history actions" : "Open watch actions"}
@@ -2443,6 +2531,7 @@ const ProgressShowRow = memo(
                   stroke="currentColor"
                   strokeWidth={4}
                   viewBox="0 0 24 24"
+                  style={isCheckButtonActive ? undefined : { color: "#9333ea" }}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
@@ -2460,7 +2549,7 @@ const ProgressShowRow = memo(
                   "flex w-12 items-center justify-center border-l border-white/5 transition-colors",
                   inWatchlist || inPersonalLists
                     ? "bg-[#23a5dd] text-white"
-                    : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300",
+                    : "bg-zinc-800 text-zinc-500 hover:bg-[#23a5dd] hover:text-white",
                 )}
                 aria-label="Open watchlist actions"
                 title="Open watchlist actions"
@@ -2743,7 +2832,9 @@ const ProgressShowRow = memo(
           triggerRef={dropButtonRef}
         />
         <ActionTooltip
-          label={shouldManageHistory ? "Remove All Plays" : "Check-in"}
+          label={
+            shouldManageHistory && !next?.traktId ? renderCheckTooltipContent(item) : "Check-in"
+          }
           isOpen={hoveredAction === "checkin"}
           triggerRef={checkinButtonRef}
         />
