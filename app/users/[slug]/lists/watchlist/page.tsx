@@ -64,7 +64,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   const genreFilter = sp.genre ?? "";
   const searchQuery = sp.q ?? "";
   const limit = 100;
-  const shouldPreserveAbsoluteRanks = sortBy === "rank";
+  const shouldPreserveAbsoluteRanks = type === "all" && sortBy === "rank";
 
   let items: WatchlistItem[] = [];
   let totalItems = 0;
@@ -85,7 +85,7 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
   try {
     const client = createTraktClient();
 
-    if (shouldPreserveAbsoluteRanks || type === "all") {
+    if (type === "all") {
       let page = 1;
       let totalPages = 1;
       while (page <= totalPages) {
@@ -196,22 +196,26 @@ export default async function WatchlistPage({ params, searchParams }: Props) {
     absoluteRank: index + 1,
   }));
 
-  if (!shouldPreserveAbsoluteRanks) {
-    if (type !== "all") {
-      rankedItems = rankedItems.filter((item) => {
-        if (type === "movies") return Boolean(item.movie);
-        if (type === "shows") return Boolean(item.show);
-        return true;
-      });
-    }
+  if (type !== "all") {
+    rankedItems = rankedItems.filter((item) => {
+      if (type === "movies") return Boolean(item.movie);
+      if (type === "shows") return Boolean(item.show);
+      return true;
+    });
+  }
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      rankedItems = rankedItems.filter((i) => {
-        const title = (i.movie?.title ?? i.show?.title ?? "").toLowerCase();
-        return title.includes(q);
-      });
-    }
+  if (genreFilter) {
+    rankedItems = rankedItems.filter((item) =>
+      (item.movie?.genres ?? item.show?.genres ?? []).includes(genreFilter),
+    );
+  }
+
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    rankedItems = rankedItems.filter((i) => {
+      const title = (i.movie?.title ?? i.show?.title ?? "").toLowerCase();
+      return title.includes(q);
+    });
   }
 
   // Collect genres for dropdown

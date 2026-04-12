@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,7 @@ import { useNavigate } from "@/lib/use-navigate";
 
 type ListEntry = {
   id: string;
+  itemKey: string;
   listItemId?: number;
   sourceRank: number;
   rank: number;
@@ -76,14 +77,15 @@ const sortOptions = [
 ];
 
 const sortHowOptions = [
-  { value: "asc", label: "Asc" },
-  { value: "desc", label: "Desc" },
+  { value: "asc", label: "↑ Asc" },
+  { value: "desc", label: "↓ Desc" },
 ];
 
 const typeFilters = [
   { value: "all", label: "All" },
   { value: "movie", label: "Movies" },
   { value: "show", label: "Shows" },
+  { value: "season", label: "Seasons" },
   { value: "episode", label: "Episodes" },
   { value: "person", label: "People" },
 ];
@@ -99,11 +101,17 @@ function getItemMeta(item: ListEntry) {
   return parts.join(" - ");
 }
 
+function formatAddedDate(value: string) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function matchesTypeFilter(item: ListEntry, filter: string) {
   if (filter === "all") return true;
-  if (filter === "show") {
-    return item.type === "show" || item.type === "season";
-  }
   return item.type === filter;
 }
 
@@ -288,21 +296,26 @@ function EditNotesModal({
   pending,
   onClose,
   onSave,
+  onRemove,
 }: {
   itemTitle: string;
   initialNotes: string | null;
   pending: boolean;
   onClose: () => void;
   onSave: (notes: string) => void;
+  onRemove: () => void;
 }) {
   const [notes, setNotes] = useState(initialNotes ?? "");
+  const hasInitialNotes = Boolean(initialNotes?.trim());
 
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold italic text-zinc-100">Add Notes</h2>
+            <h2 className="text-xl font-semibold italic text-zinc-100">
+              {hasInitialNotes ? "Edit Notes" : "Add Notes"}
+            </h2>
             <p className="mt-1 text-sm text-zinc-500">{itemTitle}</p>
           </div>
           <button
@@ -326,12 +339,22 @@ function EditNotesModal({
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
           rows={7}
-          maxLength={2000}
+          maxLength={255}
           placeholder="Write a note for this list item..."
           className="mt-5 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-white/20"
         />
 
         <div className="mt-5 flex gap-3">
+          {hasInitialNotes && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={onRemove}
+              className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -376,9 +399,24 @@ export function ListDetailClient({
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [genreFilter, setGenreFilter] = useState(activeGenres);
   const [editOpen, setEditOpen] = useState(false);
+  const [showAddedDates, setShowAddedDates] = useState(false);
+  const [noteOverrides, setNoteOverrides] = useState<Record<string, string | null>>({});
+
+  useEffect(() => {
+    setNoteOverrides({});
+  }, [items]);
+
+  const displayedItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        notes: Object.hasOwn(noteOverrides, item.id) ? noteOverrides[item.id] : item.notes,
+      })),
+    [items, noteOverrides],
+  );
 
   const filtered = useMemo(() => {
-    let result = items;
+    let result = displayedItems;
 
     if (typeFilter !== "all") {
       result = result.filter((item) => matchesTypeFilter(item, typeFilter));
@@ -394,7 +432,7 @@ export function ListDetailClient({
     }
 
     return result;
-  }, [genreFilter, items, search, typeFilter]);
+  }, [displayedItems, genreFilter, search, typeFilter]);
 
   function navigateWithFilters(sort: string, order: string, page: number, genres?: string) {
     const params = new URLSearchParams();
@@ -431,6 +469,7 @@ export function ListDetailClient({
         body: JSON.stringify(body),
         timeoutMs: 10000,
       });
+      toast("Item removed.", "error");
       router.refresh();
     } catch (error) {
       toast(getErrorMessage(error, "Failed to remove item from list."));
@@ -444,25 +483,36 @@ export function ListDetailClient({
   }
 
   function saveItemNotes(notes: string) {
-    if (!editingNotesItem?.listItemId) {
+    if (!editingNotesItem) {
       toast("This item cannot be updated right now.");
       return;
     }
 
+    const previousNotes = editingNotesItem.notes?.trim() ?? "";
+    const nextNotes = notes.trim();
+    const nextNotesValue = nextNotes || null;
+    const noteItem = editingNotesItem;
+
     startSaving(() => {
       void (async () => {
         try {
-          await fetchTraktRouteJson(
-            `/api/trakt/users/me/lists/${listSlug}/items/${editingNotesItem.listItemId}`,
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ notes }),
-              timeoutMs: 10000,
-            },
-          );
+          await fetchTraktRouteJson("/api/list-notes", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ownerSlug: slug,
+              listSlug,
+              itemKey: noteItem.itemKey,
+              notes: nextNotesValue,
+            }),
+            timeoutMs: 10000,
+          });
+          setNoteOverrides((current) => ({ ...current, [noteItem.id]: nextNotesValue }));
           setEditingNotesItem(null);
-          toast("Notes updated.");
+          toast(
+            nextNotes ? (previousNotes ? "Note updated." : "Note added.") : "Note removed.",
+            nextNotes ? "success" : "error",
+          );
           router.refresh();
         } catch (error) {
           toast(getErrorMessage(error, "Failed to update notes."));
@@ -497,7 +547,7 @@ export function ListDetailClient({
             timeoutMs: 10000,
           });
           setEditOpen(false);
-          toast("List updated.");
+          toast("List updated.", "success");
           router.refresh();
         } catch (error) {
           toast(getErrorMessage(error, "Failed to update list."));
@@ -582,36 +632,49 @@ export function ListDetailClient({
           ))}
         </div>
 
-        <Select
-          value={sortBy}
-          onChange={(value) => navigateWithFilters(value, sortHow, 1, genreFilter || undefined)}
-          options={sortOptions}
-          className="z-[260]"
-        />
-
-        {allGenres.length > 0 && (
+        <div className="ml-auto flex flex-wrap items-center gap-3">
           <Select
-            value={genreFilter}
-            onChange={(value) => {
-              setGenreFilter(value);
-              navigateWithFilters(sortBy, sortHow, 1, value || undefined);
-            }}
-            options={[
-              { value: "", label: "All Genres" },
-              ...allGenres.map((genre) => ({ value: genre, label: genre })),
-            ]}
+            value={sortBy}
+            onChange={(value) => navigateWithFilters(value, sortHow, 1, genreFilter || undefined)}
+            options={sortOptions}
             className="z-[260]"
           />
-        )}
 
-        <button
-          onClick={toggleSortOrder}
-          className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
-        >
-          {sortHow === "asc" ? "Asc" : "Desc"}
-        </button>
+          {allGenres.length > 0 && (
+            <Select
+              value={genreFilter}
+              onChange={(value) => {
+                setGenreFilter(value);
+                navigateWithFilters(sortBy, sortHow, 1, value || undefined);
+              }}
+              options={[
+                { value: "", label: "All Genres" },
+                ...allGenres.map((genre) => ({ value: genre, label: genre })),
+              ]}
+              className="z-[260]"
+            />
+          )}
 
-        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={toggleSortOrder}
+            className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
+          >
+            <span aria-hidden="true">{sortHow === "asc" ? "↑ Asc" : "↓ Desc"}</span>
+            <span className="sr-only">{sortHow === "asc" ? "Ascending" : "Descending"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAddedDates((current) => !current)}
+            className={`flex cursor-pointer items-center gap-1 rounded-lg px-3 py-1.5 text-xs ring-1 transition-colors ${
+              showAddedDates
+                ? "bg-white/10 text-white ring-white/10"
+                : "bg-white/[0.03] text-zinc-400 ring-white/5 hover:text-white"
+            }`}
+          >
+            Dates
+          </button>
+
           <ViewToggle view={view} onChange={setView} />
           <div className="relative">
             <svg
@@ -652,7 +715,7 @@ export function ListDetailClient({
                 )}
 
                 {item.type === "person" ? (
-                  <div>
+                  <div className="relative">
                     <Link
                       href={item.href}
                       className="group relative block overflow-hidden rounded-lg bg-zinc-900"
@@ -679,12 +742,46 @@ export function ListDetailClient({
                         </div>
                       </div>
                     </Link>
+                    {item.notes && (
+                      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 flex flex-col items-center gap-1.5">
+                        <div className="group/note pointer-events-auto relative inline-flex">
+                          <div className="inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm">
+                            <span>Read Notes</span>
+                            <NotesIcon />
+                          </div>
+                          <div
+                            className="pointer-events-none absolute left-1/2 bottom-full z-[80] mb-2 w-56 -translate-x-1/2 rounded-lg border border-white/10 bg-zinc-950/80 px-3 py-2 text-left text-xs leading-5 whitespace-pre-wrap text-zinc-200 opacity-0 shadow-2xl backdrop-blur-md transition-opacity group-hover/note:opacity-100"
+                            role="tooltip"
+                          >
+                            {item.notes}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {isOwner && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openNotesEditor(item);
+                        }}
+                        className="pointer-events-none absolute right-2 bottom-2 z-20 rounded bg-black/85 px-2 py-1 text-[12px] font-black text-white opacity-0 shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-all hover:bg-black group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100"
+                        aria-label={item.notes ? "Edit notes" : "Add notes"}
+                      >
+                        {item.notes ? "✎ 📝" : "+ 📝"}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <MediaCard
                     title={item.title}
                     subtitle={item.subtitle}
-                    meta={item.meta}
+                    meta={
+                      showAddedDates && item.listedAt
+                        ? `Added ${formatAddedDate(item.listedAt)}`
+                        : item.meta
+                    }
                     primaryText={item.primaryText ?? item.title}
                     secondaryText={item.secondaryText ?? getItemMeta(item) ?? undefined}
                     href={item.href}
@@ -699,15 +796,19 @@ export function ListDetailClient({
                     showInlineActions
                     squareBottom={true}
                     note={item.notes}
-                    imageFooterOverlay={
-                      isOwner && !item.notes ? (
+                    imageCornerOverlay={
+                      isOwner ? (
                         <button
                           type="button"
-                          onClick={() => openNotesEditor(item)}
-                          className="inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-black"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openNotesEditor(item);
+                          }}
+                          className="pointer-events-none rounded bg-black/85 px-2 py-1 text-[12px] font-black text-white opacity-0 shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-all hover:bg-black group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100"
+                          aria-label={item.notes ? "Edit notes" : "Add notes"}
                         >
-                          <span>Add Notes</span>
-                          <NotesIcon />
+                          {item.notes ? "✎ 📝" : "+ 📝"}
                         </button>
                       ) : null
                     }
@@ -778,11 +879,19 @@ export function ListDetailClient({
                     </span>
                   )}
                   {item.notes && (
-                    <span
-                      title={item.notes}
-                      className="rounded-full bg-amber-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-300"
-                    >
+                    <span className="group/note relative rounded-full bg-amber-500/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-300">
                       Notes
+                      <span
+                        className="pointer-events-none absolute left-1/2 bottom-full z-[80] mb-2 w-56 -translate-x-1/2 rounded-lg border border-white/10 bg-zinc-950/80 px-3 py-2 text-left text-xs leading-5 whitespace-pre-wrap text-zinc-200 opacity-0 shadow-2xl backdrop-blur-md transition-opacity group-hover/note:opacity-100"
+                        role="tooltip"
+                      >
+                        {item.notes}
+                      </span>
+                    </span>
+                  )}
+                  {showAddedDates && item.listedAt && (
+                    <span className="hidden rounded-full bg-white/[0.04] px-2 py-1 text-zinc-400 sm:inline">
+                      Added {formatAddedDate(item.listedAt)}
                     </span>
                   )}
                 </div>
@@ -790,7 +899,16 @@ export function ListDetailClient({
 
               {isOwner && (
                 <div className="flex shrink-0 items-center gap-2">
-                  {!item.notes && (
+                  {item.notes ? (
+                    <button
+                      type="button"
+                      onClick={() => openNotesEditor(item)}
+                      className="inline-flex items-center gap-1.5 rounded bg-black/85 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-white shadow-xl ring-1 ring-white/10 backdrop-blur-sm transition-colors hover:bg-black"
+                    >
+                      <span>Edit Notes</span>
+                      <NotesIcon />
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       onClick={() => openNotesEditor(item)}
@@ -804,7 +922,7 @@ export function ListDetailClient({
                     onClick={() => removeItem(item)}
                     disabled={removing === item.id}
                     className="cursor-pointer rounded p-1 text-zinc-700 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 disabled:opacity-50"
-                    title="Remove from list"
+                    aria-label="Remove from list"
                   >
                     <svg
                       className="h-3.5 w-3.5"
@@ -830,6 +948,7 @@ export function ListDetailClient({
           pending={isSaving}
           onClose={() => setEditingNotesItem(null)}
           onSave={saveItemNotes}
+          onRemove={() => saveItemNotes("")}
         />
       )}
 

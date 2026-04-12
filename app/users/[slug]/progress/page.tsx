@@ -99,7 +99,7 @@ const ITEMS_PER_PAGE = 50;
 const DETAIL_REQUEST_CONCURRENCY = 4;
 const PROGRESS_SHOW_DETAIL_TTL_MS = 30 * 60_000;
 const DETAIL_FILTERS = new Set(["returning", "ended", "completed", "not-completed"]);
-const PROGRESS_SHOW_CACHE_VERSION = "v4";
+const PROGRESS_SHOW_CACHE_VERSION = "v5";
 
 /**
  * Extracts image URLs from Trakt objects based on available types
@@ -186,10 +186,12 @@ function getHistorySeasonMap(historyItem: any) {
   const seasonMap = new Map<number, Map<number, { plays: number; lastWatchedAt: string | null }>>();
 
   for (const season of historyItem?.seasons ?? []) {
+    if (typeof season?.number !== "number" || season.number <= 0) continue;
+
     const episodeMap = new Map<number, { plays: number; lastWatchedAt: string | null }>();
 
     for (const episode of season?.episodes ?? []) {
-      if (typeof episode?.number !== "number") continue;
+      if (typeof episode?.number !== "number" || episode.number <= 0) continue;
 
       episodeMap.set(episode.number, {
         plays: typeof episode.plays === "number" ? episode.plays : 0,
@@ -197,12 +199,25 @@ function getHistorySeasonMap(historyItem: any) {
       });
     }
 
-    if (typeof season?.number === "number") {
-      seasonMap.set(season.number, episodeMap);
-    }
+    seasonMap.set(season.number, episodeMap);
   }
 
   return seasonMap;
+}
+
+function getKnownEpisodeCountForSeason(season: any, episodes: any[]) {
+  const explicitCount =
+    typeof season?.episode_count === "number"
+      ? season.episode_count
+      : typeof season?.episodeCount === "number"
+        ? season.episodeCount
+        : undefined;
+  const maxEpisodeNumber =
+    episodes.length > 0
+      ? Math.max(...episodes.map((episode: any) => episode.number).filter(Number.isFinite))
+      : 0;
+
+  return Math.max(explicitCount ?? 0, maxEpisodeNumber);
 }
 
 function findNextEpisodeFromLastWatched(
@@ -247,6 +262,13 @@ function findNextEpisodeFromLastWatched(
 function createFallbackProgressShowItem(historyItem: any): CachedProgressShowItem {
   const show = historyItem?.show ?? {};
   const traktId = show?.ids?.trakt ?? 0;
+  const historySeasonMap = getHistorySeasonMap(historyItem);
+  let nonSpecialPlays = 0;
+  historySeasonMap.forEach((episodes) => {
+    episodes.forEach((episode) => {
+      nonSpecialPlays += episode.plays;
+    });
+  });
 
   return {
     title: show?.title ?? "Unknown",
@@ -259,7 +281,7 @@ function createFallbackProgressShowItem(historyItem: any): CachedProgressShowIte
     backdropUrl: null,
     aired: 0,
     completed: 0,
-    plays: historyItem?.plays ?? 0,
+    plays: nonSpecialPlays,
     runtimeWatched: 0,
     runtimeLeft: 0,
     lastWatchedAt: historyItem?.last_watched_at ?? null,
@@ -316,7 +338,6 @@ async function getCachedProgressShowDetails(
           extractTraktImage(summary, ["poster"]) || extractTraktImage(historyItem.show, ["poster"]);
         const traktBackdrop =
           extractTraktImage(summary, ["fanart"]) || extractTraktImage(historyItem.show, ["fanart"]);
-        const watchedShowPlays = historyItem.plays ?? 0;
         const showStatus = summary?.status?.toLowerCase() || "";
         const historySeasonMap = getHistorySeasonMap(historyItem);
         const progressSeasonMap = new Map<number, any>(
@@ -453,12 +474,8 @@ async function getCachedProgressShowDetails(
         const aggregatedTotals = aggregateSeasonTotals(seasons);
         const totalAired = aggregatedTotals.aired || progress?.aired || 0;
         const completed = aggregatedTotals.completed || progress?.completed || 0;
-        const totalPlays = Math.max(aggregatedTotals.plays, completed, watchedShowPlays);
-        const totalRuntimeWatched = Math.max(
-          aggregatedTotals.runtimeWatched,
-          completed * runtime,
-          totalPlays * runtime,
-        );
+        const totalPlays = aggregatedTotals.plays;
+        const totalRuntimeWatched = aggregatedTotals.runtimeWatched;
         const totalRuntimeLeft =
           aggregatedTotals.aired > 0
             ? aggregatedTotals.runtimeLeft
@@ -466,24 +483,43 @@ async function getCachedProgressShowDetails(
         const isComplete = totalAired > 0 && completed >= totalAired;
 
         if (calculatedNextEp) {
-          const nextSeason = seasons.find((season) => season.season === calculatedNextEp?.season);
-          const lastSeasonNumber = seasons[seasons.length - 1]?.season;
+          const nextSeason = allSeasons.find(
+            (season: any) => season.number === calculatedNextEp?.season,
+          );
+          const validSeasonNumbers = allSeasons
+            .map((season: any) => season.number)
+            .filter(
+              (number: unknown): number is number => typeof number === "number" && number > 0,
+            );
+          const lastSeasonNumber =
+            validSeasonNumbers.length > 0 ? Math.max(...validSeasonNumbers) : undefined;
+          const nextSeasonEpisodes = (nextSeason?.episodes ?? []).filter(
+            (episode: any) => typeof episode.number === "number" && episode.number > 0,
+          );
+          const knownEpisodeCountInSeason = getKnownEpisodeCountForSeason(
+            nextSeason,
+            nextSeasonEpisodes,
+          );
           const lastEpisodeNumberInSeason =
-            nextSeason?.episodes[nextSeason.episodes.length - 1]?.number;
+            knownEpisodeCountInSeason > 0 ? knownEpisodeCountInSeason : undefined;
+          const hasLaterEpisodeInSameSeason = nextSeasonEpisodes.some(
+            (episode: any) => episode.number > calculatedNextEp!.number,
+          );
           const isLastSeason =
             typeof lastSeasonNumber === "number" && calculatedNextEp.season === lastSeasonNumber;
           const isLastEpisodeOfSeason =
             typeof lastEpisodeNumberInSeason === "number" &&
             calculatedNextEp.number === lastEpisodeNumberInSeason;
+          const canBeFinale = isLastEpisodeOfSeason && !hasLaterEpisodeInSameSeason;
 
-          if (calculatedNextEp.episodeType === "series_finale") {
+          if (calculatedNextEp.episodeType === "series_finale" && canBeFinale) {
             isSeriesFinale = true;
           } else if (calculatedNextEp.episodeType === "mid_season_finale") {
             isMidSeasonFinale = true;
-          } else if (calculatedNextEp.episodeType === "season_finale") {
+          } else if (calculatedNextEp.episodeType === "season_finale" && canBeFinale) {
             isSeriesFinale = isLastSeason && showStatus === "ended";
             isSeasonFinale = !isSeriesFinale;
-          } else if (isLastEpisodeOfSeason) {
+          } else if (canBeFinale) {
             isSeriesFinale = isLastSeason && showStatus === "ended";
             isSeasonFinale = !isSeriesFinale;
           }

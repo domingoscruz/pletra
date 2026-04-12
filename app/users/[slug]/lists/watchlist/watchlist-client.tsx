@@ -66,6 +66,15 @@ function getItemMeta(item: WatchlistEntry) {
   return parts.join(" - ");
 }
 
+function formatAddedDate(value: string) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export function WatchlistClient({
   items,
   slug,
@@ -200,33 +209,34 @@ export function WatchlistClient({
           ))}
         </div>
 
-        <Select
-          value={activeSort}
-          onChange={(value) => navigate({ sort: value, page: 1 })}
-          options={sortOptions}
-          className="z-[260]"
-        />
-
-        {allGenres.length > 0 && (
+        <div className="ml-auto flex flex-wrap items-center gap-3">
           <Select
-            value={activeGenre}
-            onChange={(value) => navigate({ genre: value, page: 1 })}
-            options={[
-              { value: "", label: "All Genres" },
-              ...allGenres.map((genre) => ({ value: genre, label: genre })),
-            ]}
+            value={activeSort}
+            onChange={(value) => navigate({ sort: value, page: 1 })}
+            options={sortOptions}
             className="z-[260]"
           />
-        )}
 
-        <button
-          onClick={toggleSortOrder}
-          className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
-        >
-          {activeOrder === "asc" ? "Asc" : "Desc"}
-        </button>
+          {allGenres.length > 0 && (
+            <Select
+              value={activeGenre}
+              onChange={(value) => navigate({ genre: value, page: 1 })}
+              options={[
+                { value: "", label: "All Genres" },
+                ...allGenres.map((genre) => ({ value: genre, label: genre })),
+              ]}
+              className="z-[260]"
+            />
+          )}
 
-        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={toggleSortOrder}
+            className="flex cursor-pointer items-center gap-1 rounded-lg bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400 ring-1 ring-white/5 transition-colors hover:text-white"
+          >
+            <span aria-hidden="true">{activeOrder === "asc" ? "↑ Asc" : "↓ Desc"}</span>
+            <span className="sr-only">{activeOrder === "asc" ? "Ascending" : "Descending"}</span>
+          </button>
+
           <ViewToggle view={view} onChange={setView} />
           <div className="relative">
             <svg
@@ -267,6 +277,7 @@ export function WatchlistClient({
                   title={item.title}
                   primaryText={item.title}
                   secondaryText={getItemMeta(item) || undefined}
+                  meta={item.listedAt ? `Added ${formatAddedDate(item.listedAt)}` : undefined}
                   href={item.href}
                   backdropUrl={item.backdropUrl}
                   posterUrl={item.posterUrl}
@@ -285,11 +296,11 @@ export function WatchlistClient({
       ) : filteredItems.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {filteredItems.map((item) => (
             <div
               key={item.id}
-              className="group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3 transition-colors hover:bg-white/[0.05]"
+              className="group relative flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-4 transition-colors hover:bg-white/[0.05]"
             >
               <div className="flex h-6 min-w-6 items-center justify-center rounded-full border border-white/20 bg-white/[0.05] text-[11px] font-bold text-white">
                 {item.rank}
@@ -327,13 +338,11 @@ export function WatchlistClient({
                   </span>
                 </div>
               </Link>
-              <span className="hidden shrink-0 rounded-full bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-400 sm:inline">
-                Added{" "}
-                {new Date(item.listedAt).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
+              {item.listedAt && (
+                <span className="hidden shrink-0 rounded-full bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-400 sm:inline">
+                  Added {formatAddedDate(item.listedAt)}
+                </span>
+              )}
             </div>
           ))}
         </div>

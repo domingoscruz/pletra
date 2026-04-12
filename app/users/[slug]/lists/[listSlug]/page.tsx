@@ -5,6 +5,7 @@ import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { extractTraktImage } from "@/lib/trakt-images";
 import { getOptionalTraktClient } from "@/lib/trakt-server";
 import { fetchTmdbImages, fetchTmdbPersonImage } from "@/lib/tmdb";
+import { getListNotes } from "@/lib/list-notes";
 import { ListDetailClient } from "./list-detail-client";
 
 interface Props {
@@ -107,6 +108,18 @@ type ListItemImages = {
   still: string | null;
 };
 
+function getListItemNoteKey(item: ListedItem) {
+  const type = item.type ?? (item.movie ? "movie" : item.show ? "show" : "person");
+  const traktId =
+    item.episode?.ids?.trakt ??
+    item.movie?.ids?.trakt ??
+    item.show?.ids?.trakt ??
+    item.season?.ids?.trakt ??
+    item.person?.ids?.trakt;
+
+  return `${type}:${traktId ?? "unknown"}`;
+}
+
 export default async function ListDetailPage({ params, searchParams }: Props) {
   const { slug, listSlug } = await params;
   const sp = await searchParams;
@@ -166,7 +179,7 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
             "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
             "user-agent": "pletra/1.0",
           },
-          next: { revalidate: 300 },
+          cache: "no-store",
         },
         {
           timeoutMs: 10000,
@@ -241,6 +254,8 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
   }
   const allGenres = [...genreSet].sort();
 
+  const noteOverrides = await getListNotes(slug, listSlug);
+
   const serialized = items.map((item, i) => {
     const showSlug = item.show?.ids?.slug;
     const showTitle = item.show?.title;
@@ -265,7 +280,8 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
       sourceRank: item.rank ?? i + 1,
       rank: i + 1,
       listedAt: item.listed_at ?? "",
-      notes: item.notes ?? null,
+      itemKey: getListItemNoteKey(item),
+      notes: noteOverrides[getListItemNoteKey(item)] ?? item.notes ?? null,
       type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),
       title:
         item.movie?.title ??

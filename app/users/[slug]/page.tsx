@@ -70,6 +70,7 @@ type HistoryItem = {
 type EpisodeMetadata = {
   releasedAt?: string;
   rating?: number;
+  runtime?: number;
   episodeType?: string;
   totalEpisodesInSeason: number;
   isLastSeason: boolean;
@@ -384,6 +385,17 @@ async function UserRecentEpisodes({ slug, isOwnProfile }: { slug: string; isOwnP
     const recent = historyRes.status === 200 ? (historyRes.body as HistoryItem[]) : [];
     if (recent.length === 0) return null;
 
+    const playCountByEpisodeKey = new Map<string, number>();
+    for (const item of recent) {
+      const key =
+        item.show?.ids?.trakt != null &&
+        item.episode?.season != null &&
+        item.episode?.number != null
+          ? `${item.show.ids.trakt}:${item.episode.season}:${item.episode.number}`
+          : null;
+      if (key) playCountByEpisodeKey.set(key, (playCountByEpisodeKey.get(key) ?? 0) + 1);
+    }
+
     const profileRatingMap = new Map<number, number>();
     if (ratingsRes?.status === 200) {
       for (const rating of ratingsRes.body as Array<{
@@ -498,6 +510,8 @@ async function UserRecentEpisodes({ slug, isOwnProfile }: { slug: string; isOwnP
               mediaType="episodes"
               ids={show.ids ?? {}}
               episodeIds={episode.ids ?? {}}
+              playCount={playCountByEpisodeKey.get(episodeKey)}
+              runtimeMinutes={episode.runtime ?? metadata?.runtime}
               releasedAt={releasedAt}
               watchedAt={isOwnProfile ? item.watched_at : undefined}
               variant="landscape"
@@ -533,6 +547,12 @@ async function UserRecentMovies({ slug, isOwnProfile }: { slug: string; isOwnPro
 
     const recent = historyRes.status === 200 ? (historyRes.body as HistoryItem[]) : [];
     if (recent.length === 0) return null;
+
+    const playCountByMovieId = new Map<number, number>();
+    for (const item of recent) {
+      const traktId = item.movie?.ids?.trakt;
+      if (traktId) playCountByMovieId.set(traktId, (playCountByMovieId.get(traktId) ?? 0) + 1);
+    }
 
     const profileRatingMap = new Map<number, number>();
     if (ratingsRes?.status === 200) {
@@ -592,6 +612,8 @@ async function UserRecentMovies({ slug, isOwnProfile }: { slug: string; isOwnPro
               userRating={isOwnProfile ? profileRating : viewerRating}
               mediaType="movies"
               ids={movie.ids ?? {}}
+              playCount={movie.ids?.trakt ? playCountByMovieId.get(movie.ids.trakt) : undefined}
+              runtimeMinutes={movie.runtime}
               variant="poster"
               showInlineActions
               watchedAt={isOwnProfile ? item.watched_at : undefined}

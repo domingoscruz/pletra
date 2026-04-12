@@ -737,11 +737,33 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     }),
   );
 
+  const playCountByItemKey = new Map<string, number>();
+  for (const item of items) {
+    const itemKey = item.movie?.ids?.trakt
+      ? `movie:${item.movie.ids.trakt}`
+      : item.show?.ids?.trakt != null &&
+          item.episode?.season != null &&
+          item.episode?.number != null
+        ? `episode:${item.show.ids.trakt}:${item.episode.season}:${item.episode.number}`
+        : null;
+
+    if (itemKey) {
+      playCountByItemKey.set(itemKey, (playCountByItemKey.get(itemKey) ?? 0) + 1);
+    }
+  }
+
   const serializedItems = items.map((item, i) => {
     const episodeMetadata =
       item.episode?.ids?.trakt != null
         ? episodeMetadataByShow.get(item.show?.ids?.slug ?? "")?.[item.episode.ids.trakt]
         : undefined;
+    const itemKey = item.movie?.ids?.trakt
+      ? `movie:${item.movie.ids.trakt}`
+      : item.show?.ids?.trakt != null &&
+          item.episode?.season != null &&
+          item.episode?.number != null
+        ? `episode:${item.show.ids.trakt}:${item.episode.season}:${item.episode.number}`
+        : null;
 
     return {
       id: item.id ?? i,
@@ -752,6 +774,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
       title: item.movie?.title ?? item.show?.title ?? "Unknown",
       year: item.movie?.year ?? item.show?.year,
       runtime: item.movie?.runtime ?? item.episode?.runtime,
+      playCount: itemKey ? playCountByItemKey.get(itemKey) : undefined,
       rating: item.movie?.rating ?? item.episode?.rating,
       userRating: ownProfile
         ? profileRatingsMap.get((item.movie?.ids?.trakt ?? item.episode?.ids?.trakt) as number)

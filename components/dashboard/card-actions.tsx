@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, ChangeEvent, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  ChangeEvent,
+  useCallback,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { fetchTraktRouteJson, getErrorMessage } from "@/lib/api/trakt-route";
@@ -219,6 +227,8 @@ interface CardActionsProps {
   ids: Record<string, any>;
   episodeIds?: Record<string, any>;
   historyId?: number;
+  playCount?: number;
+  runtimeMinutes?: number;
   progress?: {
     aired: number;
     completed: number;
@@ -250,11 +260,22 @@ interface CardActionsProps {
   onRate?: (rating: number) => void;
 }
 
+const formatRuntimeLabel = (totalMinutes: number) => {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return null;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = Math.round(totalMinutes % 60);
+  if (hours <= 0) return `${minutes}m`;
+  if (minutes <= 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
+
 export function CardActions({
   mediaType,
   ids,
   episodeIds,
   historyId,
+  playCount,
+  runtimeMinutes,
   progress,
   eventItem,
   userRating,
@@ -274,11 +295,14 @@ export function CardActions({
   const [showMonthSelect, setShowMonthSelect] = useState(false);
   const [showYearSelect, setShowYearSelect] = useState(false);
 
-  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<ReactNode | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
 
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckHovered, setIsCheckHovered] = useState(false);
@@ -314,6 +338,25 @@ export function CardActions({
   const listMembershipType = episodeIds ? "episodes" : mediaType;
   const activeRatingColor = getRibbonColor(localRating);
   const listPayloadKey = episodeIds ? "episodes" : mediaType;
+  const isMovieOrEpisodeAction =
+    mediaType === "movies" || mediaType === "episodes" || Boolean(episodeIds);
+  const normalizedPlayCount = Math.max(0, playCount ?? (watched ? 1 : 0));
+  const watchedRuntimeLabel =
+    normalizedPlayCount > 0 && runtimeMinutes
+      ? formatRuntimeLabel(runtimeMinutes * normalizedPlayCount)
+      : null;
+  const watchedPlayTooltip = isMovieOrEpisodeAction ? (
+    <span className="flex flex-col items-center leading-tight">
+      <span>
+        {normalizedPlayCount} {normalizedPlayCount === 1 ? "play" : "plays"}
+      </span>
+      {watchedRuntimeLabel ? (
+        <span className="mt-0.5 text-[11px] font-semibold italic normal-case text-zinc-300">
+          {watchedRuntimeLabel}
+        </span>
+      ) : null}
+    </span>
+  ) : null;
   const watchedProgressPercentage =
     progress && progress.aired > 0
       ? Math.min(
@@ -332,7 +375,9 @@ export function CardActions({
   const watchTooltipLabel = isProgressTooltipEligible
     ? `${watchedProgressPercentage}% watched`
     : watched
-      ? "Watched"
+      ? isMovieOrEpisodeAction
+        ? watchedPlayTooltip
+        : "Watched"
       : "Check-in";
   const isCheckButtonActive = watched || showWatchOptions || isCheckHovered;
   const ratingButtonColor =
@@ -461,7 +506,7 @@ export function CardActions({
       .finally(() => setListsLoading(false));
   }, [availableLists.length, showListOptions]);
 
-  const handleMouseEnterTooltip = (e: React.MouseEvent, text: string) => {
+  const handleMouseEnterTooltip = (e: React.MouseEvent, text: ReactNode) => {
     if (showWatchOptions || showListOptions || showRating) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setTooltipPos({
@@ -486,12 +531,15 @@ export function CardActions({
     );
 
     if (result.ok) {
-      setToastMessage(action === "add" ? "Added to Watchlist!" : "Removed from Watchlist!");
+      setToastMessage({
+        message: action === "add" ? "Added to Watchlist!" : "Removed from Watchlist!",
+        type: action === "add" ? "success" : "error",
+      });
       setShowListOptions(false);
       router.refresh();
     } else {
       setInWatchlist(action !== "add");
-      setToastMessage(result.message ?? "Failed to update watchlist.");
+      setToastMessage({ message: result.message ?? "Failed to update watchlist.", type: "error" });
     }
 
     setIsLoading(false);
@@ -532,14 +580,20 @@ export function CardActions({
     }
 
     if (addedCount > 0 && failedCount === 0) {
-      setToastMessage(addedCount === 1 ? "Added to 1 list!" : `Added to ${addedCount} lists!`);
+      setToastMessage({
+        message: addedCount === 1 ? "Added to 1 list!" : `Added to ${addedCount} lists!`,
+        type: "success",
+      });
       setSelectedListSlugs([]);
       setInPersonalLists(true);
       setShowListOptions(false);
     } else if (addedCount > 0) {
-      setToastMessage(`Added to ${addedCount} lists, ${failedCount} failed.`);
+      setToastMessage({
+        message: `Added to ${addedCount} lists, ${failedCount} failed.`,
+        type: "success",
+      });
     } else {
-      setToastMessage("Failed to add to selected lists.");
+      setToastMessage({ message: "Failed to add to selected lists.", type: "error" });
     }
 
     setIsLoading(false);
@@ -582,7 +636,10 @@ export function CardActions({
           );
 
     if (result.ok) {
-      setToastMessage(action === "add" ? "Watched!" : "Removed!");
+      setToastMessage({
+        message: action === "add" ? "Watched!" : "Removed!",
+        type: action === "add" ? "success" : "error",
+      });
       window.dispatchEvent(
         new CustomEvent("trakt-history-updated", {
           detail: {
@@ -601,7 +658,7 @@ export function CardActions({
       }
     } else {
       setWatched(action !== "add");
-      setToastMessage(result.message ?? "Failed to update history.");
+      setToastMessage({ message: result.message ?? "Failed to update history.", type: "error" });
     }
 
     setIsLoading(false);
@@ -611,7 +668,7 @@ export function CardActions({
   const handleCheckin = async () => {
     if (isLoading || !traktId) return;
     if (mediaType === "shows" && !episodeIds) {
-      setToastMessage("Select an episode first");
+      setToastMessage({ message: "Select an episode first", type: "error" });
       setTimeout(() => setToastMessage(null), 2500);
       return;
     }
@@ -624,11 +681,11 @@ export function CardActions({
         body: JSON.stringify({ [checkinType]: { ids: { trakt: traktId } } }),
         timeoutMs: 10000,
       });
-      setToastMessage("Watching now!");
+      setToastMessage({ message: "Watching now!", type: "success" });
       setShowWatchOptions(false);
       router.refresh();
     } catch (error) {
-      setToastMessage(getErrorMessage(error, "Check-in failed"));
+      setToastMessage({ message: getErrorMessage(error, "Check-in failed"), type: "error" });
     } finally {
       setIsLoading(false);
       setTimeout(() => setToastMessage(null), 2500);
@@ -656,11 +713,14 @@ export function CardActions({
 
     if (result.ok) {
       router.refresh();
-      setToastMessage(isRemoving ? "Rating Removed!" : "Rated!");
+      setToastMessage({
+        message: isRemoving ? "Rating Removed!" : "Rated!",
+        type: isRemoving ? "error" : "success",
+      });
     } else {
       setLocalRating(userRating && userRating > 0 ? userRating : undefined);
       onRate?.(userRating ?? 0);
-      setToastMessage(result.message ?? "Failed to update rating.");
+      setToastMessage({ message: result.message ?? "Failed to update rating.", type: "error" });
     }
 
     setIsLoading(false);
@@ -1312,7 +1372,6 @@ export function CardActions({
                       onMouseEnter={() => setHoverRating(val)}
                       onClick={() => handleRatingAction(val)}
                       aria-label={`Rate ${val} out of 10`}
-                      title={`Rate ${val} out of 10`}
                       className="transition-transform hover:scale-125"
                     >
                       <svg
@@ -1353,7 +1412,10 @@ export function CardActions({
         !(showWatchOptions || showListOptions || showRating) &&
         createPortal(
           <div
-            className="pointer-events-none fixed z-[11000] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10"
+            className={cn(
+              "pointer-events-none fixed z-[11000] -translate-x-1/2 rounded bg-zinc-900 px-2 py-1 text-[9px] font-black tracking-widest text-white shadow-xl ring-1 ring-white/10",
+              typeof activeTooltip === "string" && "uppercase",
+            )}
             style={{ top: `${tooltipPos.top}px`, left: `${tooltipPos.left}px` }}
           >
             {activeTooltip}
@@ -1364,8 +1426,15 @@ export function CardActions({
 
       {toastMessage &&
         createPortal(
-          <div className="fixed bottom-6 left-6 z-[10000] rounded-lg bg-zinc-900 border border-white/10 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white shadow-2xl animate-in slide-in-from-left-4">
-            {toastMessage}
+          <div
+            className={cn(
+              "fixed bottom-6 left-6 z-[10000] rounded-lg border px-5 py-3 text-[10px] font-black uppercase tracking-widest shadow-2xl animate-in slide-in-from-left-4",
+              toastMessage.type === "success"
+                ? "border-green-500/20 bg-green-500/10 text-green-300"
+                : "border-red-500/20 bg-red-500/10 text-red-300",
+            )}
+          >
+            {toastMessage.message}
           </div>,
           document.body,
         )}
@@ -1389,7 +1458,6 @@ export function CardActions({
             setShowListOptions(false);
           }}
           aria-label={watched ? "Open history actions" : "Open watch actions"}
-          title={watched ? "Open history actions" : "Open watch actions"}
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center rounded-bl-lg transition-all",
             isCheckButtonActive ? "bg-purple-600 text-white" : "bg-zinc-800 hover:bg-purple-600",
@@ -1418,7 +1486,6 @@ export function CardActions({
             setShowRating(false);
           }}
           aria-label="Open watchlist actions"
-          title="Open watchlist actions"
           className={cn(
             "flex h-8 w-10 shrink-0 items-center justify-center transition-all border-l border-white/10",
             inWatchlist || inPersonalLists
@@ -1452,9 +1519,6 @@ export function CardActions({
           setShowListOptions(false);
         }}
         aria-label={
-          localRating ? `Open rating actions, current rating ${localRating}` : "Open rating actions"
-        }
-        title={
           localRating ? `Open rating actions, current rating ${localRating}` : "Open rating actions"
         }
         className={cn(

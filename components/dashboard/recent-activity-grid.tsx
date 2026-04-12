@@ -7,6 +7,8 @@ import { MediaCard } from "./media-card";
 type RecentActivityItem = {
   keyId: string;
   historyId?: number;
+  playCount?: number;
+  runtimeMinutes?: number;
   title: string;
   subtitle: string;
   href: string;
@@ -69,6 +71,7 @@ export function RecentActivityGrid({ initialItems }: { initialItems: RecentActiv
         const nextItem: RecentActivityItem = {
           keyId,
           historyId: detail.historyId ?? undefined,
+          playCount: 1,
           title: eventItem.title,
           subtitle: eventItem.subtitle ?? "",
           href: eventItem.href,
@@ -157,6 +160,8 @@ export function RecentActivityGrid({ initialItems }: { initialItems: RecentActiv
               rating={item.rating}
               userRating={item.userRating}
               historyId={item.historyId}
+              playCount={item.playCount}
+              runtimeMinutes={item.runtimeMinutes}
               mediaType={item.mediaType}
               ids={item.ids}
               episodeIds={item.episodeIds}

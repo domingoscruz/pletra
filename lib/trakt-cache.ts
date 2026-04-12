@@ -8,6 +8,7 @@ interface TraktEpisodeSummary {
   first_aired?: string | null;
   rating?: number | null;
   episode_type?: string | null;
+  runtime?: number | null;
 }
 
 interface TraktSeasonSummary {
@@ -75,6 +76,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
                 {
                   releasedAt?: string;
                   rating?: number;
+                  runtime?: number;
                   episodeType?: string;
                   totalEpisodesInSeason: number;
                   isLastSeason: boolean;
@@ -95,6 +97,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
               {
                 releasedAt?: string;
                 rating?: number;
+                runtime?: number;
                 episodeType?: string;
                 totalEpisodesInSeason: number;
                 isLastSeason: boolean;
@@ -104,7 +107,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
             seasons.forEach((season) => {
               const seasonNumber = season.number ?? 0;
               const episodes = season.episodes ?? [];
-              const totalEpisodesInSeason = episodes.length;
+              const totalEpisodesInSeason = Math.max(season.episode_count ?? 0, episodes.length);
               const isLastSeason = seasonNumber === lastSeasonNumber;
 
               episodes.forEach((episode) => {
@@ -116,6 +119,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
                 metadata[traktId] = {
                   releasedAt: episode.first_aired ?? undefined,
                   rating: episode.rating ?? undefined,
+                  runtime: episode.runtime ?? undefined,
                   episodeType: episode.episode_type ?? undefined,
                   totalEpisodesInSeason,
                   isLastSeason,
@@ -133,6 +137,7 @@ export async function getCachedShowEpisodeMetadata(slug: string) {
               {
                 releasedAt?: string;
                 rating?: number;
+                runtime?: number;
                 episodeType?: string;
                 totalEpisodesInSeason: number;
                 isLastSeason: boolean;

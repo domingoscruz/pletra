@@ -45,6 +45,7 @@ function extractTraktImage(
 interface EpisodeMetadata {
   releasedAt?: string;
   rating?: number;
+  runtime?: number;
   episodeType?: string;
   totalEpisodesInSeason: number;
   isLastSeason: boolean;
@@ -148,10 +149,22 @@ async function getCachedRecentActivityItems(userKey: string) {
 
             if (allHistory.length === 0) return [];
 
+            const playCountByKey = new Map<string, number>();
+            for (const entry of allHistory) {
+              const key =
+                entry.type === "episode"
+                  ? `episode:${entry.show?.ids?.trakt ?? 0}:${entry.episode?.season ?? 0}:${entry.episode?.number ?? 0}`
+                  : `movie:${entry.movie?.ids?.trakt ?? 0}`;
+              playCountByKey.set(key, (playCountByKey.get(key) ?? 0) + 1);
+            }
+
             return Promise.all(
               allHistory.map(async (item) => {
                 const isEpisode = item.type === "episode";
                 const tmdbId = isEpisode ? item.show?.ids?.tmdb : item.movie?.ids?.tmdb;
+                const playKey = isEpisode
+                  ? `episode:${item.show?.ids?.trakt ?? 0}:${item.episode?.season ?? 0}:${item.episode?.number ?? 0}`
+                  : `movie:${item.movie?.ids?.trakt ?? 0}`;
 
                 let finalImageUrl: string | null = null;
 
@@ -229,6 +242,10 @@ async function getCachedRecentActivityItems(userKey: string) {
                     ? `recent-show-${item.show?.ids?.trakt}-ep-${item.episode?.ids?.trakt}-${item.id}`
                     : `recent-movie-${item.movie?.ids?.trakt}-${item.id}`,
                   historyId: item.id,
+                  playCount: playCountByKey.get(playKey) ?? 1,
+                  runtimeMinutes: isEpisode
+                    ? (item.episode?.runtime ?? metadata?.runtime)
+                    : item.movie?.runtime,
                   title,
                   subtitle: isEpisode
                     ? `${epLabel} ${item.episode?.title || ""}`

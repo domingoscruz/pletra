@@ -26,6 +26,7 @@ export interface HistoryItem {
     number?: number;
     title?: string;
     rating?: number;
+    runtime?: number;
     ids?: { trakt?: number };
     first_aired?: string;
   };
@@ -34,6 +35,7 @@ export interface HistoryItem {
     title?: string;
     year?: number;
     rating?: number;
+    runtime?: number;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
     released?: string;
   };
@@ -43,6 +45,7 @@ export interface HistoryItem {
 interface ThinnedEpisodeMetadata {
   firstAired: string;
   rating: number;
+  runtime?: number;
 }
 
 export type FriendsActivitySectionPayload =
@@ -92,6 +95,7 @@ async function getThinnedShowMetadata(slug: string) {
           thinnedMap[ep.ids.trakt] = {
             firstAired: ep.first_aired || "",
             rating: ep.rating || 0,
+            runtime: ep.runtime ?? undefined,
           };
         }
       });
@@ -226,6 +230,15 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
       return { status: "empty" };
     }
 
+    const playCountByActivityKey = new Map<string, number>();
+    for (const activity of sortedActivities) {
+      const friendSlug = activity._user?.ids?.slug ?? activity._user?.username ?? "unknown";
+      const key = activity.show
+        ? `${friendSlug}:episode:${activity.show?.ids?.trakt ?? 0}:${activity.episode?.season ?? 0}:${activity.episode?.number ?? 0}`
+        : `${friendSlug}:movie:${activity.movie?.ids?.trakt ?? 0}`;
+      playCountByActivityKey.set(key, (playCountByActivityKey.get(key) ?? 0) + 1);
+    }
+
     const uniqueShowSlugs = Array.from(
       new Set(sortedActivities.map((a) => a.show?.ids?.slug).filter(Boolean)),
     );
@@ -250,6 +263,10 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
           sortedActivities.map(async (activity) => {
             const isEpisode = !!activity.show;
             const tmdbId = isEpisode ? activity.show?.ids?.tmdb : activity.movie?.ids?.tmdb;
+            const friendSlug = activity._user?.ids?.slug ?? activity._user?.username ?? "unknown";
+            const playKey = isEpisode
+              ? `${friendSlug}:episode:${activity.show?.ids?.trakt ?? 0}:${activity.episode?.season ?? 0}:${activity.episode?.number ?? 0}`
+              : `${friendSlug}:movie:${activity.movie?.ids?.trakt ?? 0}`;
 
             let isWatched = false;
             let userRating: number | undefined;
@@ -324,6 +341,10 @@ export async function getFriendsActivitySectionPayload(): Promise<FriendsActivit
               mediaType: isEpisode ? ("episodes" as const) : ("movies" as const),
               ids: isEpisode ? (activity.show?.ids ?? {}) : (activity.movie?.ids ?? {}),
               episodeIds: isEpisode ? (activity.episode?.ids ?? {}) : undefined,
+              playCount: playCountByActivityKey.get(playKey) ?? 1,
+              runtimeMinutes: isEpisode
+                ? (activity.episode?.runtime ?? epMetadata?.runtime)
+                : activity.movie?.runtime,
               releasedAt,
               watched_at: activity.watched_at,
               isWatched,

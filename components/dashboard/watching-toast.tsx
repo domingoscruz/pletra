@@ -579,20 +579,20 @@ export function WatchingToast() {
           <div className="flex flex-col gap-1.5">
             <div className="flex justify-between items-end px-0.5">
               <div className="flex items-baseline gap-1.5">
-                <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">
+                <span className="text-[9px] font-bold text-purple-300 uppercase tracking-tight">
                   Progress
                 </span>
-                <span className="text-[9px] font-black text-purple-400 tabular-nums">
+                <span className="text-[9px] font-black text-purple-300 tabular-nums">
                   {Math.round(smoothProgress)}%
                 </span>
               </div>
-              <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight tabular-nums">
+              <span className="text-[9px] font-bold text-purple-300 uppercase tracking-tight tabular-nums">
                 {timeLeft}
               </span>
             </div>
             <div className="relative h-1.5 w-full bg-zinc-900 rounded-full overflow-hidden ring-1 ring-white/5">
               <div
-                className="h-full bg-purple-600 shadow-[0_0_8px_rgba(147,51,234,0.4)] transition-all duration-1000 ease-linear"
+                className="h-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.45)] transition-all duration-1000 ease-linear"
                 style={{ width: `${smoothProgress}%` }}
               />
             </div>

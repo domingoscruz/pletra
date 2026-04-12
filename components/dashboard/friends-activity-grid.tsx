@@ -15,6 +15,8 @@ export interface FriendsActivityGridItem {
   mediaType: "episodes" | "movies";
   ids: Record<string, unknown>;
   episodeIds?: Record<string, unknown>;
+  playCount?: number;
+  runtimeMinutes?: number;
   releasedAt?: string;
   watched_at?: string;
   isWatched: boolean;
@@ -80,6 +82,8 @@ export function FriendsActivityGrid({ items }: { items: FriendsActivityGridItem[
                       mediaType={item.mediaType === "episodes" ? "episodes" : "movies"}
                       ids={item.ids}
                       episodeIds={item.episodeIds}
+                      playCount={item.playCount}
+                      runtimeMinutes={item.runtimeMinutes}
                       timeBadge={formatTimeAgo(item.watched_at)}
                       timeBadgeTooltip={formatExactDate(item.watched_at)}
                       showInlineActions={true}

@@ -62,7 +62,7 @@ function formatSortLabel(sortBy?: string, sortHow?: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-  return sortHow ? `${label} ${sortHow === "asc" ? "Asc" : "Desc"}` : label;
+  return sortHow ? `${label} ${sortHow === "asc" ? "↑" : "↓"}` : label;
 }
 
 function PosterCarousel({
@@ -371,6 +371,57 @@ export function ListsClient({
     });
   }
 
+  async function movePersonalList(card: ListCardData, direction: -1 | 1) {
+    const personalCards = cards.filter((item) => item.kind === "personal");
+    const currentPersonalIndex = personalCards.findIndex((item) => item.id === card.id);
+    const nextPersonalIndex = currentPersonalIndex + direction;
+
+    if (
+      currentPersonalIndex < 0 ||
+      nextPersonalIndex < 0 ||
+      nextPersonalIndex >= personalCards.length
+    ) {
+      return;
+    }
+
+    const nextCards = [...cards];
+    const currentCardIndex = nextCards.findIndex((item) => item.id === card.id);
+    const nextCardIndex = nextCards.findIndex(
+      (item) => item.id === personalCards[nextPersonalIndex].id,
+    );
+    if (currentCardIndex < 0 || nextCardIndex < 0) return;
+
+    const previousCards = cards;
+    [nextCards[currentCardIndex], nextCards[nextCardIndex]] = [
+      nextCards[nextCardIndex],
+      nextCards[currentCardIndex],
+    ];
+    setCards(nextCards);
+
+    const rank = nextCards
+      .filter((item) => item.kind === "personal")
+      .map((item) => Number(item.id))
+      .filter((id) => Number.isFinite(id));
+
+    startTransition(() => {
+      void (async () => {
+        try {
+          await fetchTraktRouteJson("/api/trakt/users/me/lists/reorder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rank }),
+            timeoutMs: 10000,
+          });
+          toast("Lists reordered.", "success");
+          router.refresh();
+        } catch (error) {
+          setCards(previousCards);
+          toast(getErrorMessage(error, "Failed to reorder lists."));
+        }
+      })();
+    });
+  }
+
   return (
     <div className={`space-y-5 ${isPending ? "opacity-75" : ""}`}>
       <div className="relative z-[260] flex flex-col gap-3 rounded-2xl border border-white/6 bg-black/20 px-4 py-4 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
@@ -427,6 +478,8 @@ export function ListsClient({
           {filteredCards.map((card) => {
             const updatedLabel = formatCompactDate(card.updatedAt);
             const sortLabel = formatSortLabel(card.sortBy, card.sortHow);
+            const personalCards = cards.filter((item) => item.kind === "personal");
+            const personalIndex = personalCards.findIndex((item) => item.id === card.id);
 
             return (
               <div
@@ -476,6 +529,50 @@ export function ListsClient({
                       <div className="flex flex-wrap items-center gap-2">
                         {card.editable && (
                           <>
+                            <button
+                              type="button"
+                              onClick={() => void movePersonalList(card, -1)}
+                              disabled={isPending || personalIndex <= 0}
+                              className="rounded-xl border border-white/8 bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                              aria-label={`Move ${card.title} up`}
+                              title="Move up"
+                            >
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={1.8}
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M12 19.5v-15m0 0l-6 6m6-6l6 6"
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void movePersonalList(card, 1)}
+                              disabled={isPending || personalIndex === personalCards.length - 1}
+                              className="rounded-xl border border-white/8 bg-white/[0.03] p-2 text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                              aria-label={`Move ${card.title} down`}
+                              title="Move down"
+                            >
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={1.8}
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M12 4.5v15m0 0l6-6m-6 6l-6-6"
+                                />
+                              </svg>
+                            </button>
                             <button
                               type="button"
                               onClick={() => setEditingCard(card)}

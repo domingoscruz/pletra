@@ -223,7 +223,7 @@ const getStatusBadgeText = (status?: string) => {
 const getStatusBadgeClassName = (badge: string) => {
   if (badge === "Ended") return "bg-[#6b7280]";
   if (badge === "Returns Next Season") return "bg-[#06b6d4]";
-  return "bg-purple-600";
+  return "bg-purple-400";
 };
 
 type ProgressBarMode = "smart" | "simple";
@@ -271,7 +271,7 @@ const ProgressBar = ({
           {cells.map((cell, index) => (
             <div
               key={`${index}-${cell.label ?? "cell"}`}
-              className="relative h-full min-w-0 flex-1 bg-[#4a145d]"
+              className="relative h-full min-w-0 flex-1 bg-[#5b147e]"
               onMouseEnter={(event) => {
                 if (!cell.label) return;
                 const rect = event.currentTarget.getBoundingClientRect();
@@ -327,7 +327,7 @@ const ProgressBar = ({
             return (
               <div
                 key={`${index}-${segment.aired}-${segment.completed}`}
-                className="relative h-full overflow-hidden bg-[#4a145d]"
+                className="relative h-full overflow-hidden bg-[#5b147e]"
                 style={{ width }}
                 onMouseEnter={(event) => {
                   if (!segment.label) return;
@@ -389,12 +389,12 @@ const ProgressBar = ({
   return (
     <div
       className={cn(
-        "w-full overflow-hidden rounded-none bg-[#121212] ring-1 ring-white/5",
+        "w-full overflow-hidden rounded-none bg-[#5b147e] ring-1 ring-white/5",
         heightClass,
       )}
     >
       <div
-        className="h-full bg-purple-600 transition-all duration-500"
+        className="h-full bg-[#c27ae8] transition-all duration-500"
         style={{ width: `${percentage}%` }}
       />
     </div>
@@ -1341,7 +1341,6 @@ function ProgressHistoryMenu({
                   type="button"
                   onClick={() => setShowOtherDatePicker(false)}
                   aria-label="Close date picker"
-                  title="Close date picker"
                 >
                   <svg
                     className="h-4 w-4 text-zinc-500"
@@ -1381,7 +1380,6 @@ function ProgressHistoryMenu({
                     type="button"
                     onClick={() => setShowOtherDatePicker(false)}
                     aria-label="Cancel date selection"
-                    title="Cancel date selection"
                     className="rounded bg-zinc-800 p-2 text-zinc-400 transition-colors hover:text-white"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1401,7 +1399,6 @@ function ProgressHistoryMenu({
                         : handleWatchAction(selectedDate.toISOString())
                     }
                     aria-label="Confirm selected watch date"
-                    title="Confirm selected watch date"
                     className="rounded bg-green-600 p-2 text-white transition-colors hover:bg-green-500"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1422,7 +1419,6 @@ function ProgressHistoryMenu({
                     type="button"
                     onClick={handlePrevMonth}
                     aria-label="Previous month"
-                    title="Previous month"
                     className="rounded p-1 transition-colors hover:bg-zinc-800"
                   >
                     <svg className="h-3 w-3 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
@@ -1433,7 +1429,6 @@ function ProgressHistoryMenu({
                     type="button"
                     onClick={() => setSelectedDate(getNearestQuarterHour(new Date()))}
                     aria-label="Jump to today"
-                    title="Jump to today"
                     className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
                   >
                     <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
@@ -1464,7 +1459,6 @@ function ProgressHistoryMenu({
                     type="button"
                     onClick={handleNextMonth}
                     aria-label="Next month"
-                    title="Next month"
                     className="rounded p-1 transition-colors hover:bg-zinc-800"
                   >
                     <svg className="h-3 w-3 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
@@ -1565,7 +1559,6 @@ function ProgressHistoryMenu({
                       type="button"
                       onClick={() => adjustMinute(-1)}
                       aria-label="Decrease time by one minute"
-                      title="Decrease time by one minute"
                       className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"
                     >
                       <svg
@@ -1589,7 +1582,6 @@ function ProgressHistoryMenu({
                       type="button"
                       onClick={() => adjustMinute(1)}
                       aria-label="Increase time by one minute"
-                      title="Increase time by one minute"
                       className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"
                     >
                       <svg
@@ -2284,7 +2276,6 @@ const ProgressShowRow = memo(
                     }
                     className="shrink-0 text-zinc-300 transition-colors hover:text-white"
                     aria-label={item.isDropped ? "Restore this show" : "Drop this show"}
-                    title={item.isDropped ? "Restore this show" : "Drop this show"}
                   >
                     <svg
                       className="h-4 w-4"
@@ -2428,9 +2419,9 @@ const ProgressShowRow = memo(
                 </div>
               )}
 
-              <div className="absolute inset-x-3 bottom-3 z-10 flex flex-col items-start">
+              <div className="absolute inset-x-3 bottom-2 z-10 flex flex-col items-start">
                 {next?.releasedAt && (
-                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5">
                     <span className="inline-flex bg-purple-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white">
                       {formatFullDate(next.releasedAt)}
                     </span>
@@ -2463,7 +2454,7 @@ const ProgressShowRow = memo(
                 )}
 
                 {statusBadge && (
-                  <div className="mb-1.5">
+                  <div className="mb-1">
                     <span
                       className={cn(
                         "inline-flex px-1.5 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white",
@@ -2475,7 +2466,7 @@ const ProgressShowRow = memo(
                   </div>
                 )}
 
-                <div className="mt-1 w-full text-[18px] leading-tight font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] line-clamp-2 pr-2">
+                <div className="w-full text-[18px] leading-tight font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] line-clamp-2 pr-2">
                   {next ? (
                     `${formatEpisodeCode(next.season, next.number)} ${next.title || ""}`
                   ) : (
@@ -2523,7 +2514,6 @@ const ProgressShowRow = memo(
                   isCheckButtonActive ? "bg-purple-600 text-white" : "bg-zinc-800",
                 )}
                 aria-label={shouldManageHistory ? "Open history actions" : "Open watch actions"}
-                title={shouldManageHistory ? "Open history actions" : "Open watch actions"}
               >
                 <svg
                   className="h-[1.45rem] w-[1.45rem]"
@@ -2552,7 +2542,6 @@ const ProgressShowRow = memo(
                     : "bg-zinc-800 text-zinc-500 hover:bg-[#23a5dd] hover:text-white",
                 )}
                 aria-label="Open watchlist actions"
-                title="Open watchlist actions"
               >
                 <svg className="h-[1.1rem] w-[1.1rem]" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M4 6h16v2H4zm0 5h10v2H4zm0 5h16v2H4z" />
@@ -2574,11 +2563,6 @@ const ProgressShowRow = memo(
                     effectiveUserRating ? { color: getRibbonColor(effectiveUserRating) } : undefined
                   }
                   aria-label={
-                    effectiveUserRating
-                      ? `Open rating actions, current rating ${effectiveUserRating} out of 10`
-                      : "Open rating actions"
-                  }
-                  title={
                     effectiveUserRating
                       ? `Open rating actions, current rating ${effectiveUserRating} out of 10`
                       : "Open rating actions"
@@ -2756,7 +2740,6 @@ const ProgressShowRow = memo(
                     handleAction("ratings", "add", { rating: value });
                   }}
                   aria-label={`Rate ${value} out of 10`}
-                  title={`Rate ${value} out of 10`}
                 >
                   <svg
                     className={cn(

@@ -21,6 +21,7 @@ type HistoryEntry = {
   title: string;
   year?: number;
   runtime?: number;
+  playCount?: number;
   rating?: number;
   userRating?: number;
   href: string;
@@ -579,6 +580,8 @@ export function HistoryClient({
                             episodeIds={item.episodeIds}
                             specialTag={item.specialTag}
                             historyId={item.historyId}
+                            playCount={item.playCount}
+                            runtimeMinutes={item.runtime}
                             watchedAt={item.watchedAt}
                             isWatched={item.isWatched}
                             variant="poster"
