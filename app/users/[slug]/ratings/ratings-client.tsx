@@ -31,6 +31,10 @@ type RatingEntry = {
   itemType: "movie" | "show" | "season" | "episode";
   ids: Record<string, unknown>;
   genres: string[];
+  historyId?: number;
+  watchedAt?: string;
+  playCount?: number;
+  isWatched: boolean;
 };
 
 interface RatingsClientProps {
@@ -335,6 +339,11 @@ export function RatingsClient({
             userRating={item.userRating}
             mediaType={item.mediaType}
             ids={item.ids}
+            historyId={item.historyId}
+            watchedAt={item.watchedAt}
+            playCount={item.playCount}
+            runtimeMinutes={item.runtime}
+            isWatched={item.isWatched}
             variant="poster"
             showInlineActions={item.itemType !== "season"}
           />

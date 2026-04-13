@@ -147,6 +147,67 @@ function formatDayHeading(dateStr: string) {
   });
 }
 
+function getBrowserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
+function getDatePart(value: string, timeZone: string, part: Intl.DateTimeFormatPartTypes) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(new Date(value))
+    .find((datePart) => datePart.type === part)?.value;
+}
+
+function formatHistoryDayKey(value: string, timeZone: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+
+  const year = getDatePart(value, timeZone, "year");
+  const month = getDatePart(value, timeZone, "month");
+  const day = getDatePart(value, timeZone, "day");
+
+  return year && month && day ? `${year}-${month}-${day}` : value.slice(0, 10);
+}
+
+function formatUserHistoryDayHeading(value: string, timeZone: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 24 * 60 * 60 * 1000) {
+    return "Unknown Date";
+  }
+
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  });
+}
+
+function formatUserHistoryTimeLabel(value: string, timeZone: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 24 * 60 * 60 * 1000) {
+    return "Unknown Date";
+  }
+
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  });
+}
+
 function RatingRibbonChip({ rating }: { rating: number }) {
   return (
     <div
@@ -267,6 +328,7 @@ export function HistoryClient({
   const [searchInput, setSearchInput] = useState(activeSearch);
   const [showCalendar, setShowCalendar] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [userTimeZone, setUserTimeZone] = useState<string | undefined>();
   const daySectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
   const paginationPages = useMemo(
@@ -295,6 +357,10 @@ export function HistoryClient({
     [nav, slug, currentType, activeSort, activeDay, activeSearch],
   );
 
+  useEffect(() => {
+    setUserTimeZone(getBrowserTimeZone());
+  }, []);
+
   function handleSearchChange(value: string) {
     setSearchInput(value);
     if (searchTimerRef[0]) clearTimeout(searchTimerRef[0]);
@@ -304,33 +370,43 @@ export function HistoryClient({
   }
 
   const grouped = useMemo(() => {
+    const timeZone = userTimeZone;
     const groups: Array<{
       key: string;
       label: string;
       totalRuntime: number;
-      items: HistoryEntry[];
+      items: Array<HistoryEntry & { localTimeLabel?: string }>;
     }> = [];
     let currentKey = "";
 
     for (const item of items) {
-      const key = item.watched_at.slice(0, 10);
+      const key = timeZone
+        ? formatHistoryDayKey(item.watched_at, timeZone)
+        : item.watched_at.slice(0, 10);
       if (key !== currentKey) {
         currentKey = key;
         groups.push({
           key,
-          label: formatDayHeading(item.watched_at),
+          label: timeZone
+            ? formatUserHistoryDayHeading(item.watched_at, timeZone)
+            : formatDayHeading(item.watched_at),
           totalRuntime: 0,
           items: [],
         });
       }
 
       const group = groups[groups.length - 1];
-      group.items.push(item);
+      group.items.push({
+        ...item,
+        localTimeLabel: timeZone
+          ? formatUserHistoryTimeLabel(item.watched_at, timeZone)
+          : item.timeLabel,
+      });
       group.totalRuntime += item.runtime ?? 0;
     }
 
     return groups;
-  }, [items]);
+  }, [items, userTimeZone]);
 
   const calendarAnchor = activeDay || items[0]?.watched_at?.slice(0, 10) || "";
 
@@ -568,7 +644,7 @@ export function HistoryClient({
                             key={`${item.id}-${item.watched_at}-${i}`}
                             title={item.title}
                             subtitle={item.subtitle}
-                            meta={item.timeLabel}
+                            meta={item.localTimeLabel ?? item.timeLabel}
                             href={item.href}
                             showHref={item.showHref}
                             backdropUrl={item.backdropUrl}
@@ -679,7 +755,7 @@ export function HistoryClient({
                                   </span>
                                 )}
                                 <span className="text-zinc-700">•</span>
-                                <span>{item.timeLabel}</span>
+                                <span>{item.localTimeLabel ?? item.timeLabel}</span>
                               </div>
                             </div>
 
@@ -750,6 +826,7 @@ function HistoryDatePicker({
   compact?: boolean;
 }) {
   const today = new Date();
+  const [userTimeZone, setUserTimeZone] = useState<string | undefined>();
   const [monthDate, setMonthDate] = useState(() => {
     if (anchorDay) {
       const [year, month] = anchorDay.split("-").map(Number);
@@ -757,6 +834,13 @@ function HistoryDatePicker({
     }
     return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   });
+  const todayKey = userTimeZone
+    ? formatHistoryDayKey(today.toISOString(), userTimeZone)
+    : today.toISOString().slice(0, 10);
+
+  useEffect(() => {
+    setUserTimeZone(getBrowserTimeZone());
+  }, []);
 
   useEffect(() => {
     if (!anchorDay) return;
@@ -852,7 +936,7 @@ function HistoryDatePicker({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate({ day: new Date().toISOString().slice(0, 10), page: 1 })}
+          onClick={() => onNavigate({ day: todayKey, page: 1 })}
           className="rounded-full bg-white/[0.03] px-3 py-1 text-[11px] font-semibold text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
         >
           Today
@@ -874,7 +958,7 @@ function HistoryDatePicker({
           const day = index + 1;
           const dayKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
           const isSelected = activeDay === dayKey;
-          const isToday = today.toISOString().slice(0, 10) === dayKey;
+          const isToday = todayKey === dayKey;
           const hasEntries = daysWithEntries.has(dayKey);
 
           return (

@@ -42,6 +42,7 @@ type FavItem = {
 };
 
 type HistoryItem = {
+  id?: number;
   watched_at?: string;
   movie?: {
     title?: string;
@@ -510,6 +511,7 @@ async function UserRecentEpisodes({ slug, isOwnProfile }: { slug: string; isOwnP
               mediaType="episodes"
               ids={show.ids ?? {}}
               episodeIds={episode.ids ?? {}}
+              historyId={isOwnProfile ? item.id : undefined}
               playCount={playCountByEpisodeKey.get(episodeKey)}
               runtimeMinutes={episode.runtime ?? metadata?.runtime}
               releasedAt={releasedAt}
@@ -612,6 +614,7 @@ async function UserRecentMovies({ slug, isOwnProfile }: { slug: string; isOwnPro
               userRating={isOwnProfile ? profileRating : viewerRating}
               mediaType="movies"
               ids={movie.ids ?? {}}
+              historyId={isOwnProfile ? item.id : undefined}
               playCount={movie.ids?.trakt ? playCountByMovieId.get(movie.ids.trakt) : undefined}
               runtimeMinutes={movie.runtime}
               variant="poster"

@@ -84,6 +84,7 @@ export function FriendsActivityGrid({ items }: { items: FriendsActivityGridItem[
                       episodeIds={item.episodeIds}
                       playCount={item.playCount}
                       runtimeMinutes={item.runtimeMinutes}
+                      watchedAt={item.watched_at}
                       timeBadge={formatTimeAgo(item.watched_at)}
                       timeBadgeTooltip={formatExactDate(item.watched_at)}
                       showInlineActions={true}

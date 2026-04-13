@@ -102,6 +102,28 @@ export const getRibbonColor = (val: number): string => {
   return RIBBON_COLORS[score] || "#3f3f46";
 };
 
+function getBrowserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatUserDateTime(value: string) {
+  const timeZone = getBrowserTimeZone();
+
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
 /**
  * MediaCard component for the RePletra project.
  * Displays media items with custom ribbons, badges, and interactive actions.
@@ -304,6 +326,8 @@ export function MediaCard({
         : "";
   const resolvedPrimaryText = primaryText ?? defaultPrimaryText;
   const resolvedSecondaryText = secondaryText ?? defaultSecondaryText;
+  const resolvedTimeBadgeTooltip =
+    mounted && watchedAt ? formatUserDateTime(watchedAt) : timeBadgeTooltip;
 
   const handleHideCalendarShow = async () => {
     if (!showTitleAction || titleActionLoading) return;
@@ -373,7 +397,7 @@ export function MediaCard({
                 <div
                   ref={timeBadgeRef}
                   onMouseEnter={() => {
-                    if (!timeBadgeTooltip || !timeBadgeRef.current) return;
+                    if (!resolvedTimeBadgeTooltip || !timeBadgeRef.current) return;
                     const rect = timeBadgeRef.current.getBoundingClientRect();
                     setTimeBadgePosition({
                       top: rect.top - 8,
@@ -641,7 +665,7 @@ export function MediaCard({
         )}
 
       {isTimeBadgeHovered &&
-        timeBadgeTooltip &&
+        resolvedTimeBadgeTooltip &&
         mounted &&
         createPortal(
           <div
@@ -653,7 +677,7 @@ export function MediaCard({
             }}
           >
             <div className="relative rounded bg-zinc-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-xl ring-1 ring-white/10">
-              {timeBadgeTooltip}
+              {resolvedTimeBadgeTooltip}
               <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-zinc-900" />
             </div>
           </div>,
