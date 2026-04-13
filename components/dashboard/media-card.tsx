@@ -74,6 +74,7 @@ export interface MediaCardProps {
     | "New Episode";
   status?: string; // Trakt show status: ended, returning series, etc.
   statusBadge?: string;
+  statusBadgeFullOpacity?: boolean;
   badge?: string;
   timeBadge?: string;
   timeBadgeTooltip?: string;
@@ -134,6 +135,7 @@ export function MediaCard({
   specialTag,
   status,
   statusBadge,
+  statusBadgeFullOpacity = false,
   badge: _badge,
   timeBadge,
   timeBadgeTooltip,
@@ -338,7 +340,7 @@ export function MediaCard({
             {isTopTag && (
               <div
                 className={cn(
-                  "absolute top-0 left-0 right-0 z-30 flex h-[20px] w-full items-center justify-center text-[9px] font-black uppercase tracking-[0.15em] text-white shadow-md leading-none ring-1 ring-black/10",
+                  "absolute top-0 left-0 right-0 z-30 flex h-[20px] w-full items-center justify-center text-[9px] font-black uppercase tracking-[0.15em] text-white opacity-80 shadow-md leading-none ring-1 ring-black/10",
                   SPECIAL_TAG_COLORS[effectiveSpecialTag] || "bg-zinc-800",
                 )}
               >
@@ -389,6 +391,7 @@ export function MediaCard({
                 <div
                   className={cn(
                     "rounded-sm px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xl ring-1 ring-white/10",
+                    statusBadgeFullOpacity ? "opacity-100" : "opacity-80",
                     SPECIAL_TAG_COLORS[statusBadge] || "bg-zinc-800",
                   )}
                 >

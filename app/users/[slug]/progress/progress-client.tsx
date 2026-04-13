@@ -2192,18 +2192,32 @@ const ProgressShowRow = memo(
       await runDropShow();
     };
 
+    const preserveScrollPosition = (scrollY: number) => {
+      if (typeof window === "undefined") return;
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: scrollY, left: window.scrollX, behavior: "instant" });
+      });
+    };
+
     const toggleSeasonBreakdown = async () => {
+      const scrollY = typeof window === "undefined" ? 0 : window.scrollY;
+
       if (showSeasonBreakdown) {
         setExpandedSeasons([]);
         setShowSeasonBreakdown(false);
+        preserveScrollPosition(scrollY);
         return;
       }
 
       const loaded = await loadSeasonBreakdown();
-      if (loaded) setShowSeasonBreakdown(true);
+      if (loaded) {
+        setShowSeasonBreakdown(true);
+        preserveScrollPosition(scrollY);
+      }
     };
 
     const toggleSeason = async (seasonNumber: number) => {
+      const scrollY = typeof window === "undefined" ? 0 : window.scrollY;
       const loaded = await loadSeasonBreakdown();
       if (!loaded) return;
 
@@ -2213,20 +2227,24 @@ const ProgressShowRow = memo(
           ? current.filter((value) => value !== seasonNumber)
           : [...current, seasonNumber].sort((a, b) => a - b),
       );
+      preserveScrollPosition(scrollY);
     };
 
     const toggleAllSeasons = async () => {
+      const scrollY = typeof window === "undefined" ? 0 : window.scrollY;
       const loaded = await loadSeasonBreakdown();
       if (!loaded) return;
 
       if (!showSeasonBreakdown || !areAllSeasonsExpanded) {
         setShowSeasonBreakdown(true);
         setExpandedSeasons(seasonNumbers);
+        preserveScrollPosition(scrollY);
         return;
       }
 
       setExpandedSeasons([]);
       setShowSeasonBreakdown(false);
+      preserveScrollPosition(scrollY);
     };
 
     const summaryText = isComplete

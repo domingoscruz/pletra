@@ -8,6 +8,73 @@ const PRIVATE_RESPONSE_HEADERS = {
   Vary: "Cookie",
 };
 
+function getDateKeyInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  return year && month && day ? `${year}-${month}-${day}` : date.toISOString().slice(0, 10);
+}
+
+async function getTraktUserTimezone(accessToken: string, requestId: string) {
+  try {
+    const res = await requestWithPolicy(
+      `${TRAKT_API_BASE}/users/settings?extended=browsing`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "trakt-api-version": "2",
+          "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+          "user-agent": "pletra/1.0",
+          "X-Request-Id": requestId,
+        },
+        cache: "no-store",
+      },
+      {
+        timeoutMs: 5000,
+        maxRetries: 1,
+      },
+    );
+
+    if (!res.ok) return null;
+
+    const settings = (await res.json()) as { account?: { timezone?: string | null } };
+    return settings.account?.timezone ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function addUserTimezoneToCheckinBody(
+  rawBody: string | undefined,
+  accessToken: string,
+  requestId: string,
+) {
+  if (!rawBody) return rawBody;
+
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+    if (typeof parsed.app_date === "string") return rawBody;
+
+    const timezone = await getTraktUserTimezone(accessToken, requestId);
+    if (!timezone) return rawBody;
+
+    return JSON.stringify({
+      ...parsed,
+      app_date: getDateKeyInTimeZone(new Date(), timezone),
+    });
+  } catch {
+    return rawBody;
+  }
+}
+
 async function getAccessToken(req: NextRequest) {
   const session = await auth.api.getSession({
     headers: req.headers,
@@ -43,7 +110,10 @@ async function proxyToTrakt(req: NextRequest) {
   const traktUrl = `${TRAKT_API_BASE}${path}${url.search}`;
 
   // Get raw body for POST/PUT/DELETE methods
-  const body = req.method !== "GET" ? await req.text() : undefined;
+  let body = req.method !== "GET" ? await req.text() : undefined;
+  if (req.method === "POST" && path === "/checkin") {
+    body = await addUserTimezoneToCheckinBody(body, accessToken, requestId);
+  }
 
   let res: Response;
   try {

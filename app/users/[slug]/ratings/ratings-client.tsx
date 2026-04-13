@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "@/components/ui/link";
 import { ViewToggle } from "@/components/ui/view-toggle";
@@ -28,7 +28,7 @@ type RatingEntry = {
   posterUrl: string | null;
   backdropUrl: string | null;
   mediaType: "movies" | "shows" | "episodes";
-  itemType: "movie" | "show" | "episode";
+  itemType: "movie" | "show" | "season" | "episode";
   ids: Record<string, unknown>;
   genres: string[];
 };
@@ -53,6 +53,7 @@ const typeFilters = [
   { value: "all", label: "All" },
   { value: "movies", label: "Movies" },
   { value: "shows", label: "Shows" },
+  { value: "seasons", label: "Seasons" },
   { value: "episodes", label: "Episodes" },
 ];
 
@@ -234,7 +235,18 @@ export function RatingsClient({
   const [view, setView] = useState<"list" | "grid">(settings.defaultView);
   const [searchInput, setSearchInput] = useState(activeSearch);
   const [showDates, setShowDates] = useState(true);
-  const searchTimerRef = useState<ReturnType<typeof setTimeout> | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setSearchInput(activeSearch);
+  }, [activeSearch]);
+
+  useEffect(
+    () => () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    },
+    [],
+  );
   const paginationPages = useMemo(
     () => getPaginationWindow(currentPage, totalPages),
     [currentPage, totalPages],
@@ -255,7 +267,7 @@ export function RatingsClient({
       const g = overrides.genre ?? activeGenre;
       const rt = overrides.rating ?? activeRating;
       const s = overrides.sort ?? activeSort;
-      const q = overrides.q ?? activeSearch;
+      const q = overrides.q ?? searchInput;
 
       if (t !== "all") p.set("type", t);
       if (pg > 1) p.set("page", String(pg));
@@ -267,38 +279,39 @@ export function RatingsClient({
       const qs = p.toString();
       nav(`/users/${slug}/ratings${qs ? `?${qs}` : ""}`);
     },
-    [nav, slug, currentType, activeGenre, activeRating, activeSort, activeSearch],
+    [nav, slug, currentType, activeGenre, activeRating, activeSort, searchInput],
   );
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
-    if (searchTimerRef[0]) clearTimeout(searchTimerRef[0]);
-    searchTimerRef[0] = setTimeout(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
       navigate({ q: value, page: 1 });
     }, 400);
   }
 
   const grouped = useMemo(() => {
-    const groups: Array<{ key: string; label: string; items: RatingEntry[] }> = [];
-    let currentKey = "";
+    const groupMap = new Map<string, { key: string; label: string; items: RatingEntry[] }>();
 
     for (const item of items) {
       const key = getLocalDateKey(item.ratedAt);
-      if (key !== currentKey) {
-        currentKey = key;
-        groups.push({
+      const existingGroup = groupMap.get(key);
+
+      if (existingGroup) {
+        existingGroup.items.push(item);
+      } else {
+        groupMap.set(key, {
           key,
           label: formatDayHeading(item.ratedAt),
-          items: [],
+          items: [item],
         });
       }
-      groups[groups.length - 1].items.push(item);
     }
 
-    return groups;
+    return Array.from(groupMap.values());
   }, [items]);
 
-  const isFiltered = activeGenre || activeRating || activeSearch;
+  const isFiltered = currentType !== "all" || activeGenre || activeRating || activeSearch;
   const distributionForChart = distribution.slice(1);
   const average =
     totalItems > 0
@@ -323,7 +336,7 @@ export function RatingsClient({
             mediaType={item.mediaType}
             ids={item.ids}
             variant="poster"
-            showInlineActions
+            showInlineActions={item.itemType !== "season"}
           />
           <div className="px-1 -mt-1 text-center">
             <RatingLine rating={item.userRating} label={item.userRatingLabel} />
@@ -388,14 +401,16 @@ export function RatingsClient({
             </div>
           )}
 
-          <div className="hidden shrink-0 sm:block">
-            <RatingInput
-              mediaType={item.mediaType}
-              ids={item.ids}
-              currentRating={item.userRating}
-              icon="heart"
-            />
-          </div>
+          {item.itemType !== "season" && (
+            <div className="hidden shrink-0 sm:block">
+              <RatingInput
+                mediaType={item.mediaType}
+                ids={item.ids}
+                currentRating={item.userRating}
+                icon="heart"
+              />
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -415,12 +430,12 @@ export function RatingsClient({
         fullWidth
       />
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="relative z-[300] flex flex-wrap items-center gap-3">
         <div className="flex gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/5">
           {typeFilters.map((f) => (
             <button
               key={f.value}
-              onClick={() => navigate({ type: f.value, page: 1, genre: "", rating: "", q: "" })}
+              onClick={() => navigate({ type: f.value, page: 1 })}
               className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 currentType === f.value
                   ? "bg-white/10 text-white"
@@ -437,7 +452,7 @@ export function RatingsClient({
             value={activeSort}
             onChange={(v) => navigate({ sort: v, page: 1 })}
             options={sortOptions}
-            className="z-[220]"
+            className="z-[400]"
           />
           {allGenres.length > 0 && (
             <Select
@@ -447,14 +462,14 @@ export function RatingsClient({
                 { value: "", label: "All Genres" },
                 ...allGenres.map((g) => ({ value: g, label: g })),
               ]}
-              className="z-[220]"
+              className="z-[400]"
             />
           )}
           <Select
             value={activeRating}
             onChange={(v) => navigate({ rating: v, page: 1 })}
             options={ratingOptions}
-            className="z-[220]"
+            className="z-[400]"
           />
           <button
             type="button"

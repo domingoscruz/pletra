@@ -1,6 +1,6 @@
 import { Redis } from "@upstash/redis";
 
-type NoteStore = Record<string, string>;
+type NoteStore = Record<string, string | null>;
 
 const STORE_SYMBOL = Symbol.for("pletra:list-notes");
 type GlobalWithNotes = typeof globalThis & {
@@ -55,11 +55,7 @@ export async function setListNote(
   const current = await getListNotes(ownerSlug, listSlug);
   const next = { ...current };
 
-  if (notes?.trim()) {
-    next[itemKey] = notes.trim();
-  } else {
-    delete next[itemKey];
-  }
+  next[itemKey] = notes?.trim() ? notes.trim() : null;
 
   const redisClient = getRedis();
   if (redisClient) {

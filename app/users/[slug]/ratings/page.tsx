@@ -3,12 +3,15 @@ import { getUserDisplayName, getUserProfileData } from "@/lib/metadata";
 import { createTraktClient } from "@/lib/trakt";
 import { isTraktExpectedError } from "@/lib/trakt-errors";
 import { fetchTmdbImages } from "@/lib/tmdb";
+import { requestWithPolicy } from "@/lib/api/http";
+import { proxyImageUrl } from "@/lib/image-proxy";
+import { extractTraktImage } from "@/lib/trakt-images";
 import { RatingsClient } from "./ratings-client";
 
 interface Props {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{
-    type?: string;
+    type?: RatingType;
     page?: string;
     genre?: string;
     sort?: string;
@@ -30,7 +33,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 type RatedItem = {
   rating?: number;
   rated_at?: string;
-  type?: string;
+  type?: "movie" | "show" | "season" | "episode";
   movie?: {
     title?: string;
     year?: number;
@@ -38,6 +41,7 @@ type RatedItem = {
     rating?: number;
     genres?: string[];
     ids?: { slug?: string; tmdb?: number; trakt?: number };
+    images?: Record<string, unknown> | null;
   };
   show?: {
     title?: string;
@@ -46,6 +50,14 @@ type RatedItem = {
     genres?: string[];
     runtime?: number;
     ids?: { slug?: string; tmdb?: number; trakt?: number };
+    images?: Record<string, unknown> | null;
+  };
+  season?: {
+    number?: number;
+    title?: string;
+    rating?: number;
+    ids?: { trakt?: number; tmdb?: number };
+    images?: Record<string, unknown> | null;
   };
   episode?: {
     season?: number;
@@ -57,6 +69,8 @@ type RatedItem = {
 };
 
 const ITEMS_PER_PAGE = 42;
+type RatingType = "all" | "movies" | "shows" | "seasons" | "episodes";
+type SortOption = "recent" | "rating-desc" | "rating-asc" | "title" | "year" | "community";
 const RATING_LABELS = [
   "Weak sauce :(",
   "Terrible",
@@ -119,15 +133,50 @@ function paginateWithRecentLeadPage(
   };
 }
 
+async function fetchRatedSeasons(slug: string): Promise<RatedItem[]> {
+  const res = await requestWithPolicy(
+    `https://api.trakt.tv/users/${encodeURIComponent(slug)}/ratings/seasons?extended=full,images`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": process.env.TRAKT_CLIENT_ID!,
+        "user-agent": "pletra/1.0",
+      },
+      cache: "no-store",
+    },
+    {
+      timeoutMs: 10000,
+      maxRetries: 2,
+    },
+  );
+
+  if (!res.ok) return [];
+
+  const items = (await res.json()) as RatedItem[];
+  return items.map((item) => ({ ...item, type: "season" as const }));
+}
+
 export default async function RatingsPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
-  const type = (sp.type as "all" | "movies" | "shows" | "episodes") || "all";
-  const page = parseInt(sp.page ?? "1", 10);
+  const typeOptions: RatingType[] = ["all", "movies", "shows", "seasons", "episodes"];
+  const type = typeOptions.includes(sp.type ?? "all") ? (sp.type ?? "all") : "all";
+  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const genreFilter = sp.genre ?? "";
   const ratingFilter = sp.rating ?? "";
-  const sortBy = sp.sort ?? "recent";
-  const searchQuery = sp.q ?? "";
+  const sortOptions: SortOption[] = [
+    "recent",
+    "rating-desc",
+    "rating-asc",
+    "title",
+    "year",
+    "community",
+  ];
+  const sortBy = sortOptions.includes((sp.sort ?? "recent") as SortOption)
+    ? ((sp.sort ?? "recent") as SortOption)
+    : "recent";
+  const searchQuery = sp.q?.trim() ?? "";
   const recentDayLimit = 14;
   const usesRecentLeadPage =
     type === "all" && !genreFilter && !ratingFilter && !searchQuery && sortBy === "recent";
@@ -137,44 +186,57 @@ export default async function RatingsPage({ params, searchParams }: Props) {
     const client = createTraktClient();
 
     if (type === "all") {
-      const [moviesRes, showsRes, episodesRes] = await Promise.all([
-        client.users.ratings.movies({ params: { id: slug }, query: { extended: "full" } }),
-        client.users.ratings.shows({ params: { id: slug }, query: { extended: "full" } }),
-        client.users.ratings.episodes({ params: { id: slug }, query: { extended: "full" } }),
+      const [moviesRes, showsRes, seasonsRes, episodesRes] = await Promise.all([
+        client.users.ratings.movies({ params: { id: slug }, query: { extended: "full,images" } }),
+        client.users.ratings.shows({ params: { id: slug }, query: { extended: "full,images" } }),
+        fetchRatedSeasons(slug),
+        client.users.ratings.episodes({
+          params: { id: slug },
+          query: { extended: "full,images" },
+        }),
       ]);
 
       if (moviesRes.status === 200) {
-        allItems.push(...(moviesRes.body as RatedItem[]).map((i) => ({ ...i, type: "movie" })));
+        allItems.push(
+          ...(moviesRes.body as RatedItem[]).map((i) => ({ ...i, type: "movie" as const })),
+        );
       }
       if (showsRes.status === 200) {
-        allItems.push(...(showsRes.body as RatedItem[]).map((i) => ({ ...i, type: "show" })));
+        allItems.push(
+          ...(showsRes.body as RatedItem[]).map((i) => ({ ...i, type: "show" as const })),
+        );
       }
+      allItems.push(...seasonsRes);
       if (episodesRes.status === 200) {
-        allItems.push(...(episodesRes.body as RatedItem[]).map((i) => ({ ...i, type: "episode" })));
+        allItems.push(
+          ...(episodesRes.body as RatedItem[]).map((i) => ({ ...i, type: "episode" as const })),
+        );
       }
     } else if (type === "movies") {
       const res = await client.users.ratings.movies({
         params: { id: slug },
-        query: { extended: "full" },
+        query: { extended: "full,images" },
       });
       if (res.status === 200) {
-        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "movie" }));
+        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "movie" as const }));
       }
     } else if (type === "shows") {
       const res = await client.users.ratings.shows({
         params: { id: slug },
-        query: { extended: "full" },
+        query: { extended: "full,images" },
       });
       if (res.status === 200) {
-        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "show" }));
+        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "show" as const }));
       }
+    } else if (type === "seasons") {
+      allItems = await fetchRatedSeasons(slug);
     } else {
       const res = await client.users.ratings.episodes({
         params: { id: slug },
-        query: { extended: "full" },
+        query: { extended: "full,images" },
       });
       if (res.status === 200) {
-        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "episode" }));
+        allItems = (res.body as RatedItem[]).map((i) => ({ ...i, type: "episode" as const }));
       }
     }
   } catch (error) {
@@ -212,8 +274,21 @@ export default async function RatingsPage({ params, searchParams }: Props) {
     const q = searchQuery.toLowerCase();
     filteredItems = filteredItems.filter((i) => {
       const title = (i.movie?.title ?? i.show?.title ?? "").toLowerCase();
+      const seasonTitle = i.season?.title?.toLowerCase() ?? "";
       const epTitle = i.episode?.title?.toLowerCase() ?? "";
-      return title.includes(q) || epTitle.includes(q);
+      const seasonLabel =
+        i.type === "season" && i.season?.number != null ? `season ${i.season.number}` : "";
+      const episodeLabel =
+        i.type === "episode" && i.episode?.season != null && i.episode?.number != null
+          ? `${i.episode.season}x${String(i.episode.number).padStart(2, "0")}`
+          : "";
+      return (
+        title.includes(q) ||
+        seasonTitle.includes(q) ||
+        epTitle.includes(q) ||
+        seasonLabel.includes(q) ||
+        episodeLabel.includes(q)
+      );
     });
   }
 
@@ -231,16 +306,16 @@ export default async function RatingsPage({ params, searchParams }: Props) {
       case "rating-asc":
         return (a.rating ?? 0) - (b.rating ?? 0);
       case "title": {
-        const aTitle = a.movie?.title ?? a.show?.title ?? "";
-        const bTitle = b.movie?.title ?? b.show?.title ?? "";
+        const aTitle = `${a.movie?.title ?? a.show?.title ?? ""} ${a.season?.title ?? ""}`;
+        const bTitle = `${b.movie?.title ?? b.show?.title ?? ""} ${b.season?.title ?? ""}`;
         return aTitle.localeCompare(bTitle);
       }
       case "year":
         return (b.movie?.year ?? b.show?.year ?? 0) - (a.movie?.year ?? a.show?.year ?? 0);
       case "community":
         return (
-          (b.movie?.rating ?? b.show?.rating ?? b.episode?.rating ?? 0) -
-          (a.movie?.rating ?? a.show?.rating ?? a.episode?.rating ?? 0)
+          (b.movie?.rating ?? b.show?.rating ?? b.season?.rating ?? b.episode?.rating ?? 0) -
+          (a.movie?.rating ?? a.show?.rating ?? a.season?.rating ?? a.episode?.rating ?? 0)
         );
       default:
         return new Date(b.rated_at ?? 0).getTime() - new Date(a.rated_at ?? 0).getTime();
@@ -268,7 +343,11 @@ export default async function RatingsPage({ params, searchParams }: Props) {
       const tmdbId = item.movie?.ids?.tmdb ?? item.show?.ids?.tmdb;
       const tmdbType = item.movie ? "movie" : "tv";
       return tmdbId
-        ? fetchTmdbImages(tmdbId, tmdbType as "movie" | "tv").catch(() => ({
+        ? fetchTmdbImages(
+            tmdbId,
+            tmdbType as "movie" | "tv",
+            item.type === "season" ? item.season?.number : undefined,
+          ).catch(() => ({
             poster: null,
             backdrop: null,
           }))
@@ -277,7 +356,12 @@ export default async function RatingsPage({ params, searchParams }: Props) {
   );
 
   const serialized = pageItems.map((item, i) => ({
-    id: item.movie?.ids?.trakt ?? item.show?.ids?.trakt ?? item.episode?.ids?.trakt ?? i,
+    id:
+      item.movie?.ids?.trakt ??
+      item.show?.ids?.trakt ??
+      item.season?.ids?.trakt ??
+      item.episode?.ids?.trakt ??
+      i,
     userRating: item.rating ?? 0,
     userRatingLabel:
       item.rating && item.rating >= 1 && item.rating <= 10
@@ -288,34 +372,56 @@ export default async function RatingsPage({ params, searchParams }: Props) {
       hour: "numeric",
       minute: "2-digit",
     }),
-    communityRating: item.movie?.rating ?? item.show?.rating ?? item.episode?.rating,
+    communityRating:
+      item.movie?.rating ?? item.show?.rating ?? item.season?.rating ?? item.episode?.rating,
     title:
       item.type === "episode"
         ? (item.show?.title ?? "Unknown")
-        : (item.movie?.title ?? item.show?.title ?? "Unknown"),
+        : item.type === "season"
+          ? (item.show?.title ?? "Unknown")
+          : (item.movie?.title ?? item.show?.title ?? "Unknown"),
     year: item.movie?.year ?? item.show?.year,
     runtime: item.movie?.runtime ?? item.show?.runtime,
     subtitle:
       item.type === "episode" && item.episode
         ? `${item.episode.season}x${String(item.episode.number ?? 0).padStart(2, "0")} ${item.episode.title ?? ""}`.trim()
-        : undefined,
+        : item.type === "season"
+          ? `Season ${item.season?.number ?? ""}${item.season?.title ? `: ${item.season.title}` : ""}`.trim()
+          : undefined,
     href:
       item.type === "movie"
         ? `/movies/${item.movie?.ids?.slug}`
         : item.type === "show"
           ? `/shows/${item.show?.ids?.slug}`
-          : item.episode
-            ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
-            : `/shows/${item.show?.ids?.slug}`,
-    showHref: item.type === "episode" ? `/shows/${item.show?.ids?.slug}` : undefined,
-    posterUrl: images[i]?.poster ?? null,
-    backdropUrl: images[i]?.backdrop ?? null,
-    mediaType: (item.type === "movie" ? "movies" : item.type === "show" ? "shows" : "episodes") as
-      | "movies"
-      | "shows"
-      | "episodes",
-    itemType: (item.type ?? "movie") as "movie" | "show" | "episode",
-    ids: item.movie?.ids ?? item.show?.ids ?? item.episode?.ids ?? {},
+          : item.type === "season"
+            ? `/shows/${item.show?.ids?.slug}/seasons/${item.season?.number}`
+            : item.episode
+              ? `/shows/${item.show?.ids?.slug}/seasons/${item.episode.season}/episodes/${item.episode.number}`
+              : `/shows/${item.show?.ids?.slug}`,
+    showHref:
+      item.type === "episode" || item.type === "season"
+        ? `/shows/${item.show?.ids?.slug}`
+        : undefined,
+    posterUrl: proxyImageUrl(
+      images[i]?.poster ??
+        extractTraktImage(item.movie ?? item.season ?? item.show, ["poster"]) ??
+        extractTraktImage(item.show, ["poster"]),
+    ),
+    backdropUrl: proxyImageUrl(
+      images[i]?.backdrop ??
+        extractTraktImage(item.movie ?? item.season ?? item.show, [
+          "fanart",
+          "screenshot",
+          "thumb",
+        ]),
+    ),
+    mediaType: (item.type === "movie"
+      ? "movies"
+      : item.type === "episode"
+        ? "episodes"
+        : "shows") as "movies" | "shows" | "episodes",
+    itemType: (item.type ?? "movie") as "movie" | "show" | "season" | "episode",
+    ids: item.movie?.ids ?? item.season?.ids ?? item.show?.ids ?? item.episode?.ids ?? {},
     genres: item.movie?.genres ?? item.show?.genres ?? [],
   }));
 

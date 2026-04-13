@@ -61,7 +61,7 @@ export default function LoginPage() {
           <button
             onClick={signIn}
             disabled={disabled}
-            className="flex w-full cursor-pointer items-center justify-center gap-3 rounded-lg bg-red-600 px-4 py-3 font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full cursor-pointer items-center justify-center gap-3 rounded-lg bg-[#9810fa] px-4 py-3 font-medium text-white transition-colors hover:bg-[#8a0ee0] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />

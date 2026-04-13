@@ -281,7 +281,9 @@ export default async function ListDetailPage({ params, searchParams }: Props) {
       rank: i + 1,
       listedAt: item.listed_at ?? "",
       itemKey: getListItemNoteKey(item),
-      notes: noteOverrides[getListItemNoteKey(item)] ?? item.notes ?? null,
+      notes: Object.hasOwn(noteOverrides, getListItemNoteKey(item))
+        ? noteOverrides[getListItemNoteKey(item)]
+        : (item.notes ?? null),
       type: item.type ?? (item.movie ? "movie" : item.show ? "show" : "person"),
       title:
         item.movie?.title ??

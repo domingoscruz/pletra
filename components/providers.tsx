@@ -23,7 +23,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <SettingsProvider>
         <ProgressProvider
-          color="#ed1c24"
+          color="#9810fa"
           height="4px"
           options={{ showSpinner: false }}
           shallowRouting

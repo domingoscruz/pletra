@@ -47,6 +47,7 @@ export function UpcomingScheduleGrid({ items }: { items: UpcomingScheduleGridIte
           isWatched={false}
           showInlineActions={true}
           variant="landscape"
+          statusBadgeFullOpacity
           showTitleAction={
             item.mediaType === "episodes" && item.showTraktId
               ? {
